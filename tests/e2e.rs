@@ -77,3 +77,15 @@ fn silence_fills_the_gap_after_bursts_stop() {
     assert!(samples[decoded - 1536 * 6..decoded].iter().any(|s| *s != 0.0));
     assert!(samples[decoded..].iter().all(|s| *s == 0.0));
 }
+
+#[test]
+fn prints_daemon_sources_for_the_layout() {
+    let output = Command::new(env!("CARGO_BIN_EXE_atmos67"))
+        .args(["--layout", "7.1.4", "--aes67-sources"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let json = String::from_utf8(output.stdout).unwrap();
+    assert!(json.contains("\"map\": [0, 1, 2, 3, 4, 5, 6, 7]"));
+    assert!(json.contains("\"map\": [8, 9, 10, 11]"));
+}

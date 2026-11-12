@@ -2,6 +2,7 @@
 //! decodes E-AC-3 / E-AC-3 JOC (Dolby Digital Plus Atmos) and renders it to the
 //! given speaker layout, writing interleaved FLOAT32LE PCM on stdout.
 
+mod aes67;
 mod iec61937;
 
 use std::error::Error;
@@ -11,7 +12,8 @@ use iec61937::{DATA_TYPE_EAC3, Depacketizer};
 use openjoc_api::{OpenJocConfig, OpenJocPacket, OpenJocSession, OpenJocStatus};
 use openjoc_scene::SpeakerLayout;
 
-const USAGE: &str = "usage: atmos67 (--layout PRESET | --layout-file LAYOUT.json) < capture.s16le > speakers.f32le";
+const USAGE: &str = "usage: atmos67 (--layout PRESET | --layout-file LAYOUT.json) < capture.s16le > speakers.f32le
+       atmos67 (--layout PRESET | --layout-file LAYOUT.json) --aes67-sources > status.json";
 
 /// HDMI carries E-AC-3 in a stereo 16-bit stream at four times the audio
 /// rate, so one output frame corresponds to 4 input frames of 4 bytes.
@@ -26,7 +28,11 @@ const MAX_LAG_FRAMES: u64 = 2 * 1536;
 const GAP_BYTES: u64 = 1536 * INPUT_BYTES_PER_OUTPUT_FRAME * 3 / 2;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let print_sources = args.last().is_some_and(|arg| arg == "--aes67-sources");
+    if print_sources {
+        args.pop();
+    }
     let config = match args.as_slice() {
         [flag, name] if flag == "--layout" => OpenJocConfig {
             speaker_layout: name.clone(),
@@ -39,6 +45,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     let mut session = OpenJocSession::new(config)?;
     let info = session.output_info();
+    if print_sources {
+        print!("{}", aes67::status_json(info.channel_count));
+        return Ok(());
+    }
     eprintln!(
         "atmos67: output {} channels [{}], FLOAT32LE",
         info.channel_count,
