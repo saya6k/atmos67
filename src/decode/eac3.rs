@@ -6,15 +6,18 @@ use super::joc::Joc;
 use crate::layout::Layout;
 use crate::render::Panner;
 
-/// While playing the bed, try OpenJOC again this often (about once a second).
+/// After this many rejected bursts in a row the stream is taken to have no
+/// usable Atmos metadata, and OpenJOC is tried only now and then.
+const GIVE_UP_AFTER: u32 = 4;
+
+/// How often OpenJOC is tried once given up on (about once a second).
 const RETRY_BURSTS: u32 = 32;
 
 pub struct Eac3 {
     joc: Joc,
     core: Option<Ffmpeg>,
-    use_core: bool,
-    bursts_since_retry: u32,
-    last_reason: Option<String>,
+    /// Bursts in a row that OpenJOC rejected or was not offered.
+    rejected: u32,
     scratch: Vec<f32>,
 }
 
@@ -23,9 +26,7 @@ impl Eac3 {
         Self {
             joc,
             core: None,
-            use_core: false,
-            bursts_since_retry: 0,
-            last_reason: None,
+            rejected: 0,
             scratch: Vec::new(),
         }
     }
@@ -37,28 +38,21 @@ impl Eac3 {
         panner: &Panner,
         out: &mut Vec<f32>,
     ) -> Result<(), String> {
-        self.bursts_since_retry += 1;
-        if !self.use_core || self.bursts_since_retry >= RETRY_BURSTS {
-            self.bursts_since_retry = 0;
+        let try_joc = self.rejected < GIVE_UP_AFTER || self.rejected.is_multiple_of(RETRY_BURSTS);
+        if try_joc {
             self.scratch.clear();
             match self.joc.decode(burst, &mut self.scratch) {
                 Ok(()) => {
-                    self.use_core = false;
+                    self.rejected = 0;
                     out.extend_from_slice(&self.scratch);
                     return Ok(());
                 }
                 Err(reason) => {
-                    if self.last_reason.as_ref() != Some(&reason) {
+                    // Say so when the bed takes over, not at every retry.
+                    if self.rejected == 0 {
                         eprintln!(
                             "atmos67: no Atmos decoding for this E-AC-3 stream ({reason}); playing its channel bed"
                         );
-                        self.last_reason = Some(reason);
-                    }
-                    if !self.use_core {
-                        if let Some(core) = &mut self.core {
-                            core.reset();
-                        }
-                        self.use_core = true;
                     }
                 }
             }
@@ -67,6 +61,11 @@ impl Eac3 {
             self.core = Some(Ffmpeg::new(Id::EAC3)?);
         }
         let core = self.core.as_mut().expect("created above");
+        if self.rejected == 0 {
+            // The bed decoder last saw some other part of the stream.
+            core.reset();
+        }
+        self.rejected += 1;
         for unit in eac3_access_units(burst) {
             core.decode(unit, layout, panner, out)?;
         }
@@ -79,7 +78,6 @@ impl Eac3 {
         if let Some(core) = &mut self.core {
             core.reset();
         }
-        self.use_core = false;
-        self.bursts_since_retry = 0;
+        self.rejected = 0;
     }
 }

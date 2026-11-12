@@ -103,3 +103,52 @@ fn eac3_5_1_matches_ffmpeg() {
 fn eac3_7_1_matches_ffmpeg() {
     assert_matches_ffmpeg("Dolby Digital Plus E-AC-3 7.1.mp4", "0:a:0", "7.1", 8, &[]);
 }
+
+fn rms_per_channel(samples: &[f32], channels: usize) -> Vec<f64> {
+    let frames = samples.len() / channels;
+    (0..channels)
+        .map(|c| {
+            let sum: f64 = (0..frames).map(|i| f64::from(samples[i * channels + c]).powi(2)).sum();
+            (sum / frames as f64).sqrt()
+        })
+        .collect()
+}
+
+#[test]
+#[ignore]
+fn stream_openjoc_rejects_plays_its_channel_bed() {
+    let Some(path) = sample("Atmos test tones 1000Hz V4.mp4") else { return };
+    let reference = floats(&ffmpeg(&path, "0:a:0", &["-f", "f32le", "-c:a", "pcm_f32le"]));
+    let spdif = ffmpeg(&path, "0:a:0", &["-c", "copy", "-f", "spdif"]);
+    let (samples, log) = atmos67(&["--layout", "5.1"], spdif);
+    assert_eq!(log.matches("playing its channel bed").count(), 1, "{log}");
+    for (channel, (ours, theirs, diff)) in compare(&samples, &reference, 6).iter().enumerate() {
+        eprintln!("ch{channel}: ours {:.1} dB, ffmpeg {:.1} dB, difference {:.1} dB", db(*ours), db(*theirs), db(*diff));
+        assert!(db(*diff) < -60.0, "channel {channel}\n{log}");
+    }
+    assert!(rms_per_channel(&samples, 6).iter().any(|rms| *rms > 1e-3), "silent\n{log}");
+}
+
+#[test]
+#[ignore]
+fn atmos_streams_still_use_openjoc() {
+    let Some(path) = sample("Dolby Atmos test by Buzz_Buzz_Buzz_ - 7.1.4 master with 5.1 E-AC-3 bed.mp4") else { return };
+    let spdif = ffmpeg(&path, "0:a:0", &["-c", "copy", "-f", "spdif"]);
+    let (samples, log) = atmos67(&["--layout", "7.1.4"], spdif);
+    assert!(!log.contains("channel bed"), "{log}");
+    // The 5.1 core has no height channels; only object decoding fills them.
+    let rms = rms_per_channel(&samples, 12);
+    assert!(rms[8..].iter().any(|r| *r > 1e-4), "{rms:?}");
+}
+
+#[test]
+#[ignore]
+fn one_rejected_access_unit_does_not_switch_the_stream_to_its_bed() {
+    let Some(path) = sample("Dolby Atmos E-AC-3 5.1.2.mp4") else { return };
+    let spdif = ffmpeg(&path, "0:a:0", &["-c", "copy", "-f", "spdif"]);
+    let (samples, log) = atmos67(&["--layout", "5.1.2"], spdif);
+    // Its first access unit carries metadata OpenJOC rejects; the rest decode.
+    assert!(log.contains("playing its channel bed"), "{log}");
+    let rms = rms_per_channel(&samples, 8);
+    assert!(rms[6..].iter().all(|r| *r > 1e-4), "{rms:?}");
+}

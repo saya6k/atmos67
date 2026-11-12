@@ -39,6 +39,7 @@ const CHANNEL_NAMES: [(u32, &str); 22] = [
 ];
 
 pub struct Ffmpeg {
+    id: Id,
     decoder: codec::decoder::Audio,
     frame: frame::Audio,
     interleaved: Vec<f32>,
@@ -51,13 +52,9 @@ impl Ffmpeg {
         ffmpeg_next::init().map_err(|error| error.to_string())?;
         // Damaged frames are reported by the caller, once, not by libavcodec.
         ffmpeg_next::log::set_level(ffmpeg_next::log::Level::Fatal);
-        let codec = codec::decoder::find(id).ok_or(format!("FFmpeg has no {id:?} decoder"))?;
-        let decoder = codec::Context::new_with_codec(codec)
-            .decoder()
-            .audio()
-            .map_err(|error| error.to_string())?;
         Ok(Self {
-            decoder,
+            id,
+            decoder: open(id)?,
             frame: frame::Audio::empty(),
             interleaved: Vec::new(),
             bed: None,
@@ -101,8 +98,13 @@ impl Ffmpeg {
     }
 
     /// Forgets the stream so far, for when it stops or changes.
+    ///
+    /// The decoder is replaced, not flushed: libavcodec's E-AC-3 decoder
+    /// comes back from a flush about 0.4 dB quieter.
     pub fn reset(&mut self) {
-        self.decoder.flush();
+        if let Ok(decoder) = open(self.id) {
+            self.decoder = decoder;
+        }
     }
 
     fn interleave(&mut self, channels: usize) -> Result<(), String> {
@@ -132,6 +134,14 @@ impl Ffmpeg {
         }
         Ok(())
     }
+}
+
+fn open(id: Id) -> Result<codec::decoder::Audio, String> {
+    let codec = codec::decoder::find(id).ok_or(format!("FFmpeg has no {id:?} decoder"))?;
+    codec::Context::new_with_codec(codec)
+        .decoder()
+        .audio()
+        .map_err(|error| error.to_string())
 }
 
 const I32_SCALE: f32 = 2_147_483_648.0;

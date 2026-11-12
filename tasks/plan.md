@@ -43,7 +43,7 @@
   - Verify: E2E + 샘플 시험(성공 기준 1의 AC-3, E-AC-3 5.1/7.1)
   - Files: `src/decode/ffmpeg.rs`, `src/main.rs`, `tests/e2e.rs`, `tests/samples.rs`, `tests/fixtures/*`
 
-- [ ] **T8. OpenJOC 거부 시 대체 디코딩**
+- [x] **T8. OpenJOC 거부 시 대체 디코딩**
   - Acceptance: OpenJOC가 스트림을 거부하면 FFmpeg 코어 디코딩으로 넘어가고 그 사실을 한 번 알린다. 정상 JOC 스트림의 출력은 바뀌지 않는다.
   - Verify: 샘플 시험(성공 기준 2, 5)
   - Files: `src/main.rs`, `src/decode/joc.rs`, `tests/samples.rs`
