@@ -6,7 +6,7 @@
 //! without speakers there; whatever lands on them is shared among their
 //! neighbours.
 
-use crate::layout::{Direction, Layout, dot, normalize};
+use crate::layout::{Direction, Layout, canonical, dot, nominal_direction, normalize};
 
 const UP: Direction = [0.0, 0.0, 1.0];
 const DOWN: Direction = [0.0, 0.0, -1.0];
@@ -133,6 +133,79 @@ impl Panner {
             out[self.outputs[node]] = (p / total.max(f64::MIN_POSITIVE)).sqrt() as f32;
         }
         out
+    }
+}
+
+/// A named channel within this angle of a speaker goes to that speaker alone.
+const SNAP_DEGREES: f64 = 5.0;
+
+/// Fixed routing of named input channels (a channel bed) onto a layout.
+pub struct BedMix {
+    /// For each input channel, the (output, gain) pairs it feeds.
+    routes: Vec<Vec<(usize, f32)>>,
+    output_count: usize,
+    /// Input channels with nowhere to go: LFE without a subwoofer, or a
+    /// name with no known position.
+    pub dropped: Vec<String>,
+}
+
+impl BedMix {
+    pub fn new(layout: &Layout, panner: &Panner, channels: &[&str]) -> Self {
+        let mut dropped = Vec::new();
+        let routes = channels
+            .iter()
+            .map(|label| {
+                let name = canonical(label);
+                let route = if name == "LFE" {
+                    let subs = layout.speakers.iter().enumerate().filter(|(_, s)| s.lfe);
+                    subs.map(|(index, _)| (index, 1.0)).collect()
+                } else if let Some(index) = layout
+                    .speakers
+                    .iter()
+                    .position(|s| !s.lfe && canonical(&s.name) == name)
+                {
+                    vec![(index, 1.0)]
+                } else if let Some(direction) = nominal_direction(name) {
+                    let near = layout.speakers.iter().position(|s| {
+                        !s.lfe && dot(s.direction, direction) > SNAP_DEGREES.to_radians().cos()
+                    });
+                    match near {
+                        Some(index) => vec![(index, 1.0)],
+                        None => {
+                            let gains = panner.gains(direction);
+                            (0..gains.len())
+                                .filter(|i| gains[*i] > 0.0)
+                                .map(|i| (i, gains[i]))
+                                .collect()
+                        }
+                    }
+                } else {
+                    Vec::new()
+                };
+                if route.is_empty() {
+                    dropped.push((*label).to_owned());
+                }
+                route
+            })
+            .collect();
+        Self {
+            routes,
+            output_count: layout.speakers.len(),
+            dropped,
+        }
+    }
+
+    /// Appends the mixed frames of interleaved `input` to `output`.
+    pub fn mix(&self, input: &[f32], output: &mut Vec<f32>) {
+        for frame in input.chunks_exact(self.routes.len()) {
+            let start = output.len();
+            output.resize(start + self.output_count, 0.0);
+            for (sample, route) in frame.iter().zip(&self.routes) {
+                for (index, gain) in route {
+                    output[start + index] += sample * gain;
+                }
+            }
+        }
     }
 }
 
@@ -281,5 +354,57 @@ mod tests {
             assert!((power(&panner.gains(direction(azimuth, 0.0))) - 1.0).abs() < 1e-5);
         }
         assert_eq!(active(&panner.gains(direction(-90.0, 0.0))), [0]);
+    }
+
+    const SEVEN_ONE: [&str; 8] = ["FL", "FR", "FC", "LFE", "BL", "BR", "SL", "SR"];
+
+    fn mixed(layout: &Layout, channels: &[&str], input: &[f32]) -> (Vec<f32>, Vec<String>) {
+        let bed = BedMix::new(layout, &Panner::new(layout), channels);
+        let mut output = Vec::new();
+        bed.mix(input, &mut output);
+        (output, bed.dropped)
+    }
+
+    #[test]
+    fn a_bed_on_its_own_layout_is_passed_through_by_name() {
+        let input = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let (output, dropped) = mixed(&seven_one_four(), &SEVEN_ONE, &input);
+        assert_eq!(output, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 0.0, 0.0, 0.0, 0.0]);
+        assert!(dropped.is_empty());
+    }
+
+    #[test]
+    fn missing_rear_speakers_fold_into_the_surrounds() {
+        let five_one = layout(&[
+            ("FL", -30.0, 0.0),
+            ("FR", 30.0, 0.0),
+            ("FC", 0.0, 0.0),
+            ("LFE", 0.0, 0.0),
+            ("Ls", -110.0, 0.0),
+            ("Rs", 110.0, 0.0),
+        ]);
+        let only_back_left = [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
+        let (output, _) = mixed(&five_one, &SEVEN_ONE, &only_back_left);
+        assert!(output[4] > 0.9, "{output:?}");
+        assert!(output[..4].iter().all(|g| *g == 0.0));
+        // The side channel matches the surround speaker by name, not angle.
+        let only_side_left = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+        let (output, _) = mixed(&five_one, &SEVEN_ONE, &only_side_left);
+        assert_eq!(output, [0.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn a_channel_near_a_differently_named_speaker_snaps_to_it() {
+        let custom = layout(&[("Left", -27.0, 0.0), ("Right", 27.0, 0.0), ("Mid", 0.0, 0.0)]);
+        let (output, _) = mixed(&custom, &["FL"], &[1.0]);
+        assert_eq!(output, [1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn lfe_without_a_subwoofer_and_unknown_names_are_dropped() {
+        let stereo = layout(&[("FL", -30.0, 0.0), ("FR", 30.0, 0.0)]);
+        let (output, dropped) = mixed(&stereo, &["FL", "LFE", "Mystery"], &[1.0, 1.0, 1.0]);
+        assert_eq!(output, [1.0, 0.0]);
+        assert_eq!(dropped, ["LFE", "Mystery"]);
     }
 }

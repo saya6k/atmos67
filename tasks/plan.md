@@ -21,7 +21,7 @@
   - Verify: 단위 시험
   - Files: `src/render.rs`
 
-- [ ] **T4. 베드 렌더** (`src/render.rs`)
+- [x] **T4. 베드 렌더** (`src/render.rs`)
   - Acceptance: 채널 이름이 붙은 PCM 블록을 출력 배치로 보낸다. 5° 이내 스피커가 있으면 그 하나로만, LFE는 `lfe` 스피커로(없으면 버림).
   - Verify: 단위 시험 (7.1 → 7.1 항등, 7.1 → 5.1에서 Lb가 Ls 쪽으로, LFE 없는 배치)
   - Files: `src/render.rs`
