@@ -26,7 +26,7 @@
   - Verify: 단위 시험 (7.1 → 7.1 항등, 7.1 → 5.1에서 Lb가 Ls 쪽으로, LFE 없는 배치)
   - Files: `src/render.rs`
 
-- [ ] **T5. 디코더 분리 리팩터** (동작 변화 없음)
+- [x] **T5. 디코더 분리 리팩터** (동작 변화 없음)
   - Acceptance: OpenJOC 세션 코드가 `src/decode/joc.rs`로 옮겨지고 `main`은 버스트 타입에 따라 디코더를 고른다. 기존 E2E 출력이 바이트 단위로 같다.
   - Verify: `cargo test`
   - Files: `src/main.rs`, `src/decode/mod.rs`, `src/decode/joc.rs`
