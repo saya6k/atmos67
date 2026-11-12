@@ -16,7 +16,7 @@
   - Verify: 단위 시험 (5.1.2 픽스처 배치, 7.1.4 프리셋)
   - Files: `src/layout.rs`, `src/main.rs`
 
-- [ ] **T3. VBAP 게인** (`src/render.rs`)
+- [x] **T3. VBAP 게인** (`src/render.rs`)
   - Acceptance: 임의 방향에 대해 스피커 게인을 낸다. 스피커 방향이면 그 스피커만 1, 두 스피커 사이면 그 둘만, 항상 제곱합 1. 높이 스피커가 없는 평면 배치에서도 동작한다.
   - Verify: 단위 시험
   - Files: `src/render.rs`

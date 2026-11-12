@@ -7,6 +7,8 @@ mod iec61937;
 // Not wired in until the channel-based decoders arrive (T7).
 #[allow(dead_code)]
 mod layout;
+#[allow(dead_code)]
+mod render;
 
 use std::error::Error;
 use std::io::{self, Read, Write};
