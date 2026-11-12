@@ -6,7 +6,9 @@
 //! without speakers there; whatever lands on them is shared among their
 //! neighbours.
 
-use crate::layout::{Direction, Layout, canonical, dot, nominal_direction, normalize};
+use std::collections::VecDeque;
+
+use crate::layout::{Direction, Layout, canonical, direction, dot, nominal_direction, normalize};
 
 const UP: Direction = [0.0, 0.0, 1.0];
 const DOWN: Direction = [0.0, 0.0, -1.0];
@@ -136,6 +138,121 @@ impl Panner {
     }
 }
 
+impl Panner {
+    /// Gains for a position in the Dolby Atmos room: a cube with x from -1
+    /// (left wall) to 1, y from 1 (front wall) to -1, z from 0 (ear level)
+    /// to 1 (ceiling). Sources on the walls or ceiling are panned by
+    /// direction; towards the middle of the room they spread over all
+    /// speakers. Object size, snap and zone constraints are not modelled.
+    pub fn room_gains(&self, [x, y, z]: [f64; 3]) -> Vec<f32> {
+        let radius = x.abs().max(y.abs());
+        let elevation = z.atan2(radius).to_degrees();
+        // The cube's front corners are the front left and right speakers,
+        // which sit at 30 degrees; the ceiling corners sit at 45.
+        let front = 30.0 + 15.0 * (elevation.abs() / 45.0).min(1.0);
+        let cube_azimuth = if radius > 0.0 { x.atan2(y).to_degrees() } else { 0.0 };
+        let azimuth = match cube_azimuth.abs() {
+            a if a <= 45.0 => a * front / 45.0,
+            a if a <= 90.0 => front + (a - 45.0) * (90.0 - front) / 45.0,
+            a => a,
+        }
+        .copysign(cube_azimuth);
+        let mut gains = self.gains(direction(azimuth, elevation));
+        let on_surface = radius.max(z.abs()).min(1.0) as f32;
+        let spread = (1.0 - on_surface) / self.outputs.len().max(1) as f32;
+        for output in &self.outputs {
+            let gain = &mut gains[*output];
+            *gain = (on_surface * *gain * *gain + spread).sqrt();
+        }
+        gains
+    }
+}
+
+/// Mixes audio objects whose gains change over time.
+pub struct ObjectMix {
+    output_count: usize,
+    objects: Vec<Object>,
+    /// Frames mixed so far.
+    clock: u64,
+}
+
+#[derive(Default)]
+struct Object {
+    gains: Vec<f32>,
+    step: Vec<f32>,
+    ramp_left: u32,
+    updates: VecDeque<Update>,
+}
+
+struct Update {
+    at: u64,
+    ramp: u32,
+    target: Vec<f32>,
+}
+
+impl ObjectMix {
+    pub fn new(objects: usize, output_count: usize) -> Self {
+        let object = || Object {
+            gains: vec![0.0; output_count],
+            step: vec![0.0; output_count],
+            ..Object::default()
+        };
+        Self {
+            output_count,
+            objects: (0..objects).map(|_| object()).collect(),
+            clock: 0,
+        }
+    }
+
+    /// Moves an object to `target` gains, starting `delay` frames from now
+    /// and arriving `ramp` frames after that.
+    pub fn schedule(&mut self, object: usize, delay: u64, ramp: u32, target: Vec<f32>) {
+        if let Some(object) = self.objects.get_mut(object) {
+            object.updates.push_back(Update {
+                at: self.clock + delay,
+                ramp,
+                target,
+            });
+        }
+    }
+
+    /// Appends the mixed frames of interleaved `input`, one channel per
+    /// object, to `output`.
+    pub fn mix(&mut self, input: &[f32], channels: usize, output: &mut Vec<f32>) {
+        for frame in input.chunks_exact(channels) {
+            let start = output.len();
+            output.resize(start + self.output_count, 0.0);
+            let mixed = &mut output[start..];
+            for (sample, object) in frame.iter().zip(&mut self.objects) {
+                while object.updates.front().is_some_and(|u| u.at <= self.clock) {
+                    let update = object.updates.pop_front().expect("checked above");
+                    if update.ramp == 0 {
+                        object.gains = update.target;
+                        object.ramp_left = 0;
+                    } else {
+                        for ((step, gain), target) in
+                            object.step.iter_mut().zip(&object.gains).zip(&update.target)
+                        {
+                            *step = (target - gain) / update.ramp as f32;
+                        }
+                        object.ramp_left = update.ramp;
+                    }
+                }
+                if object.ramp_left > 0 {
+                    for (gain, step) in object.gains.iter_mut().zip(&object.step) {
+                        *gain += step;
+                    }
+                    object.ramp_left -= 1;
+                }
+                for (out, gain) in mixed.iter_mut().zip(&object.gains) {
+                    *out += sample * gain;
+                }
+            }
+            self.clock += 1;
+        }
+    }
+}
+
 /// A named channel within this angle of a speaker goes to that speaker alone.
 const SNAP_DEGREES: f64 = 5.0;
 
@@ -155,33 +272,7 @@ impl BedMix {
         let routes = channels
             .iter()
             .map(|label| {
-                let name = canonical(label);
-                let route = if name == "LFE" {
-                    let subs = layout.speakers.iter().enumerate().filter(|(_, s)| s.lfe);
-                    subs.map(|(index, _)| (index, 1.0)).collect()
-                } else if let Some(index) = layout
-                    .speakers
-                    .iter()
-                    .position(|s| !s.lfe && canonical(&s.name) == name)
-                {
-                    vec![(index, 1.0)]
-                } else if let Some(direction) = nominal_direction(name) {
-                    let near = layout.speakers.iter().position(|s| {
-                        !s.lfe && dot(s.direction, direction) > SNAP_DEGREES.to_radians().cos()
-                    });
-                    match near {
-                        Some(index) => vec![(index, 1.0)],
-                        None => {
-                            let gains = panner.gains(direction);
-                            (0..gains.len())
-                                .filter(|i| gains[*i] > 0.0)
-                                .map(|i| (i, gains[i]))
-                                .collect()
-                        }
-                    }
-                } else {
-                    Vec::new()
-                };
+                let route = route(layout, panner, label);
                 if route.is_empty() {
                     dropped.push((*label).to_owned());
                 }
@@ -207,6 +298,40 @@ impl BedMix {
             }
         }
     }
+}
+
+/// The (output, gain) pairs a named channel feeds; empty when it has
+/// nowhere to go.
+fn route(layout: &Layout, panner: &Panner, label: &str) -> Vec<(usize, f32)> {
+    let name = canonical(label);
+    if name == "LFE" {
+        let subs = layout.speakers.iter().enumerate().filter(|(_, s)| s.lfe);
+        return subs.map(|(index, _)| (index, 1.0)).collect();
+    }
+    let named = |s: &crate::layout::Speaker| !s.lfe && canonical(&s.name) == name;
+    if let Some(index) = layout.speakers.iter().position(named) {
+        return vec![(index, 1.0)];
+    }
+    let Some(direction) = nominal_direction(name) else {
+        return Vec::new();
+    };
+    let near = |s: &crate::layout::Speaker| {
+        !s.lfe && dot(s.direction, direction) > SNAP_DEGREES.to_radians().cos()
+    };
+    if let Some(index) = layout.speakers.iter().position(near) {
+        return vec![(index, 1.0)];
+    }
+    let gains = panner.gains(direction);
+    (0..gains.len()).filter(|i| gains[*i] > 0.0).map(|i| (i, gains[i])).collect()
+}
+
+/// Per-output gains for a named channel, as `route` gives them.
+pub fn channel_gains(layout: &Layout, panner: &Panner, label: &str) -> Vec<f32> {
+    let mut gains = vec![0.0; layout.speakers.len()];
+    for (index, gain) in route(layout, panner, label) {
+        gains[index] = gain;
+    }
+    gains
 }
 
 fn min(gains: &[f64; 3]) -> f64 {
@@ -247,7 +372,7 @@ fn sub(u: Direction, v: Direction) -> Direction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::{Speaker, direction};
+    use crate::layout::Speaker;
 
     fn layout(speakers: &[(&str, f64, f64)]) -> Layout {
         Layout {
@@ -406,5 +531,53 @@ mod tests {
         let (output, dropped) = mixed(&stereo, &["FL", "LFE", "Mystery"], &[1.0, 1.0, 1.0]);
         assert_eq!(output, [1.0, 0.0]);
         assert_eq!(dropped, ["LFE", "Mystery"]);
+    }
+    #[test]
+    fn atmos_room_corners_are_the_speakers() {
+        let panner = Panner::new(&seven_one_four());
+        // FL FR FC LFE Lb Rb Ls Rs TFL TFR TBL TBR
+        let corners = [
+            ([-1.0, 1.0, 0.0], 0),
+            ([1.0, 1.0, 0.0], 1),
+            ([0.0, 1.0, 0.0], 2),
+            ([-1.0, -1.0, 0.0], 4),
+            ([1.0, -1.0, 0.0], 5),
+            ([-1.0, 0.0, 0.0], 6),
+            ([1.0, 0.0, 0.0], 7),
+            ([-1.0, 1.0, 1.0], 8),
+            ([1.0, 1.0, 1.0], 9),
+            ([-1.0, -1.0, 1.0], 10),
+            ([1.0, -1.0, 1.0], 11),
+        ];
+        for (position, speaker) in corners {
+            assert_eq!(active(&panner.room_gains(position)), [speaker], "{position:?}");
+        }
+    }
+
+    #[test]
+    fn the_middle_of_the_room_is_every_speaker_equally() {
+        let panner = Panner::new(&seven_one_four());
+        let gains = panner.room_gains([0.0, 0.0, 0.0]);
+        assert_eq!(active(&gains).len(), 11);
+        assert!((power(&gains) - 1.0).abs() < 1e-5);
+        assert!((gains[0] - gains[11]).abs() < 1e-6);
+        // Halfway to the left wall leans left without leaving the others silent.
+        let gains = panner.room_gains([-0.5, 0.0, 0.0]);
+        assert!(gains[6] > 2.0 * gains[7] && gains[7] > 0.0, "{gains:?}");
+        assert!((power(&gains) - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn objects_jump_ramp_and_wait_as_scheduled() {
+        let mut mix = ObjectMix::new(2, 2);
+        mix.schedule(0, 0, 0, vec![1.0, 0.0]);
+        mix.schedule(1, 2, 0, vec![0.0, 0.5]);
+        mix.schedule(0, 4, 4, vec![0.0, 1.0]);
+        let mut out = Vec::new();
+        mix.mix(&[1.0, 1.0].repeat(9), 2, &mut out);
+        let left: Vec<f32> = out.iter().step_by(2).copied().collect();
+        let right: Vec<f32> = out.iter().skip(1).step_by(2).copied().collect();
+        assert_eq!(left, [1.0, 1.0, 1.0, 1.0, 0.75, 0.5, 0.25, 0.0, 0.0]);
+        assert_eq!(right, [0.0, 0.0, 0.5, 0.5, 0.75, 1.0, 1.25, 1.5, 1.5]);
     }
 }

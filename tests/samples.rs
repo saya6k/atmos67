@@ -17,8 +17,13 @@ fn sample(name: &str) -> Option<PathBuf> {
 }
 
 fn ffmpeg(input: &PathBuf, stream: &str, output: &[&str]) -> Vec<u8> {
+    ffmpeg_at(input, "0", SECONDS, stream, output)
+}
+
+/// Runs FFmpeg on `seconds` of one stream of `input`, starting at `start`.
+fn ffmpeg_at(input: &PathBuf, start: &str, seconds: &str, stream: &str, output: &[&str]) -> Vec<u8> {
     let out = Command::new("ffmpeg")
-        .args(["-v", "error", "-t", SECONDS, "-i"])
+        .args(["-v", "error", "-ss", start, "-t", seconds, "-i"])
         .arg(input)
         .args(["-map", stream])
         .args(output)
@@ -190,4 +195,49 @@ fn one_rejected_access_unit_does_not_switch_the_stream_to_its_bed() {
     assert!(log.contains("playing its channel bed"), "{log}");
     let rms = rms_per_channel(&samples, 8);
     assert!(rms[6..].iter().all(|r| *r > 1e-4), "{rms:?}");
+}
+
+/// This file names one speaker of a 7.1.4 room per minute, in this order.
+const WALK: [&str; 12] = ["FL", "FR", "FC", "LFE", "Ls", "Rs", "Lb", "Rb", "TFL", "TFR", "TBL", "TBR"];
+/// Output order of the `7.1.4` preset.
+const PRESET_7_1_4: [&str; 12] = ["FL", "FR", "FC", "LFE", "Lb", "Rb", "Ls", "Rs", "TFL", "TFR", "TBL", "TBR"];
+
+/// Levels in dB of the 7.1.4 render of five seconds from the middle of
+/// `minute`, taken from stream `stream` of the 7.1.4 walk file.
+fn walk_levels(path: &PathBuf, stream: &str, minute: usize, extra: &[&str]) -> Vec<f64> {
+    let start = (minute * 60 + 25).to_string();
+    let spdif = ffmpeg_at(path, &start, "5", stream, &["-c", "copy", "-f", "spdif"]);
+    let (samples, log) = atmos67(&[&["--layout", "7.1.4"], extra].concat(), spdif);
+    assert!(samples.len() > 3 * 48_000 * 12, "{} samples\n{log}", samples.len());
+    // Skip the first second: decoding starts at the next sync point.
+    rms_per_channel(&samples[48_000 * 12..], 12).iter().map(|rms| db(*rms)).collect()
+}
+
+#[test]
+#[ignore]
+fn truehd_atmos_objects_reach_the_speaker_they_name() {
+    let Some(path) = sample("Dolby Atmos TrueHD, E-AC-3 7.1.4.mkv") else { return };
+    let mut agree = 0;
+    for (minute, expected) in WALK.iter().enumerate() {
+        let truehd = walk_levels(&path, "0:a:0", minute, &EIGHT_CHANNELS);
+        let joc = walk_levels(&path, "0:a:2", minute, &[]);
+        let loudest = |levels: &[f64]| {
+            let index = (0..12).max_by(|a, b| levels[*a].total_cmp(&levels[*b])).unwrap();
+            PRESET_7_1_4[index]
+        };
+        let own = PRESET_7_1_4.iter().position(|name| name == expected).unwrap();
+        let mut others = truehd.clone();
+        others.remove(own);
+        let leak = others.iter().cloned().fold(f64::MIN, f64::max);
+        eprintln!(
+            "{expected}: TrueHD loudest {} at {:.1} dB (next {leak:.1} dB), E-AC-3 JOC loudest {}",
+            loudest(&truehd), truehd[own], loudest(&joc)
+        );
+        assert_eq!(loudest(&truehd), *expected);
+        assert!(truehd[own] > -40.0, "{expected} is too quiet");
+        assert!(truehd[own] - leak > 20.0, "{expected} leaks into another speaker");
+        agree += usize::from(loudest(&truehd) == loudest(&joc));
+    }
+    // SPEC success criterion 3: at least 80 % agreement with the JOC track.
+    assert!(agree * 10 >= WALK.len() * 8, "{agree} of {} agree", WALK.len());
 }

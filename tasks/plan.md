@@ -65,7 +65,7 @@
   - Verify: E2E + 샘플 시험(성공 기준 1의 TrueHD 7.1)
   - Files: `src/decode/truehd.rs`, `src/main.rs`, `tests/*`
 
-- [ ] **T12. TrueHD Atmos 객체**
+- [x] **T12. TrueHD Atmos 객체**
   - Acceptance: 16채널 프레젠테이션과 OAMD를 읽어 베드는 베드로, 객체는 위치·게인(보간 포함)에 따라 렌더한다.
   - Verify: 샘플 시험(성공 기준 3)
   - Files: `src/decode/truehd.rs`, `src/render.rs`, `tests/samples.rs`
