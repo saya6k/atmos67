@@ -55,7 +55,7 @@
 
 ## 3단계: TrueHD
 
-- [ ] **T10. MAT 해체** (`src/mat.rs`)
+- [x] **T10. MAT 해체** (`src/mat.rs`)
   - Acceptance: MAT 프레임에서 TrueHD 액세스 유닛을 순서대로 꺼낸다(프레임 경계에 걸친 유닛 포함). TrueHD가 아닌 MAT(PCM)는 감지해 알린다.
   - Verify: 단위 시험 (FFmpeg로 만든 TrueHD 7.1 MAT 픽스처에서 꺼낸 유닛이 원본 .thd와 바이트 단위로 같음)
   - Files: `src/mat.rs`, `tests/fixtures/*`

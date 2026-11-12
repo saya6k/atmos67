@@ -6,6 +6,8 @@ mod aes67;
 mod decode;
 mod iec61937;
 mod layout;
+#[allow(dead_code)] // used from T11 on
+mod mat;
 mod render;
 
 use std::error::Error;
