@@ -11,7 +11,7 @@
   - Files: `Cargo.toml`, `Cargo.lock`, `README.md`
   - Risk: Alpine(musl)에서 `ffmpeg-next`의 bindgen 빌드가 안 되면 Debian 기반 이미지로 바꾼다.
 
-- [ ] **T2. 스피커 배치와 표준 채널 위치** (`src/layout.rs`)
+- [x] **T2. 스피커 배치와 표준 채널 위치** (`src/layout.rs`)
   - Acceptance: 프리셋·JSON 배치에서 스피커별 방향 벡터·역할·이름을 얻는다. 표준 채널(FL, FR, FC, LFE, Ls, Rs, Lb, Rb, 천장 등)의 방위각·고도 표가 있다.
   - Verify: 단위 시험 (5.1.2 픽스처 배치, 7.1.4 프리셋)
   - Files: `src/layout.rs`, `src/main.rs`
