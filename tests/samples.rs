@@ -82,7 +82,14 @@ fn assert_matches_ffmpeg(name: &str, layout: &str, channels: usize, mux: &[&str]
     let Some(path) = sample(name) else { return String::new() };
     let reference = floats(&ffmpeg(&path, "0:a:0", &["-f", "f32le", "-c:a", "pcm_f32le"]));
     let spdif = ffmpeg(&path, "0:a:0", &[&["-c", "copy"], mux, &["-f", "spdif"]].concat());
+    // Output must last as long as the capture did (SPEC success criterion 6).
+    let capture_channels = if extra.contains(&"--input-channels") { 8 } else { 2 };
+    let capture_rate = if extra.contains(&"--input-rate") { 48_000 } else { 192_000 };
+    let captured = spdif.len() / (capture_channels * 2) * 48_000 / capture_rate;
     let (samples, log) = atmos67(&[&["--layout", layout], extra].concat(), spdif);
+    let frames = samples.len() / channels;
+    eprintln!("{name}: {frames} frames out for {captured} frames of capture");
+    assert!(frames.abs_diff(captured) <= 2 * 1536 + 1024, "{name}: output length\n{log}");
     assert!(samples.len() >= reference.len() * 9 / 10, "{name}: {} of {} samples\n{log}", samples.len(), reference.len());
     for (channel, (ours, theirs, diff)) in compare(&samples, &reference, channels).iter().enumerate() {
         eprintln!("{name} ch{channel}: ours {:.1} dB, ffmpeg {:.1} dB, difference {:.1} dB", db(*ours), db(*theirs), db(*diff));
