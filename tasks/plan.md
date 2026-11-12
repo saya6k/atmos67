@@ -31,7 +31,7 @@
   - Verify: `cargo test`
   - Files: `src/main.rs`, `src/decode/mod.rs`, `src/decode/joc.rs`
 
-- [ ] **T6. 입력 형식 옵션**
+- [x] **T6. 입력 형식 옵션**
   - Acceptance: `--input-channels 2|8`, `--input-rate`(기본 192000). 8채널 캡처에서 전체 채널에 실린 버스트와 앞 2채널에만 실린 버스트를 모두 찾는다. 무음 채움이 입력 형식에 맞게 계산된다.
   - Verify: 단위 시험 + E2E (기존 JOC 픽스처를 8채널로 펼친 입력이 2채널 입력과 같은 출력)
   - Files: `src/main.rs`, `src/iec61937.rs`, `tests/e2e.rs`

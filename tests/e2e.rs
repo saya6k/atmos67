@@ -89,3 +89,20 @@ fn prints_daemon_sources_for_the_layout() {
     assert!(json.contains("\"map\": [0, 1, 2, 3, 4, 5, 6, 7]"));
     assert!(json.contains("\"map\": [8, 9, 10, 11]"));
 }
+
+#[test]
+fn eight_channel_capture_decodes_like_stereo() {
+    let wide: Vec<u8> = SPDIF
+        .chunks(4)
+        .flat_map(|frame| [frame, &[0u8; 12]].concat())
+        .collect();
+    let from_wide = run(&["--layout", "5.1", "--input-channels", "8"], &wide);
+    assert_eq!(from_wide, run(&["--layout", "5.1"], SPDIF));
+}
+
+#[test]
+fn input_rate_sets_the_silence_clock() {
+    // At 48 kHz stereo input, one input frame (4 bytes) is one output frame.
+    let samples = run(&["--layout", "5.1", "--input-rate", "48000"], &vec![0u8; 4 * 10_000]);
+    assert_eq!(samples.len(), (10_000 - MAX_LAG_FRAMES) * 6);
+}

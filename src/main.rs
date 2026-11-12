@@ -1,4 +1,5 @@
-//! Reads HDMI capture (S16LE stereo PCM carrying IEC 61937 bursts) on stdin,
+//! Reads HDMI capture (S16LE PCM, stereo or 8-channel, carrying IEC 61937
+//! bursts) on stdin,
 //! decodes E-AC-3 / E-AC-3 JOC (Dolby Digital Plus Atmos) and renders it to the
 //! given speaker layout, writing interleaved FLOAT32LE PCM on stdout.
 
@@ -14,41 +15,58 @@ mod render;
 use std::error::Error;
 use std::io::{self, Read, Write};
 
-use iec61937::{DATA_TYPE_EAC3, Depacketizer};
+use iec61937::{Capture, DATA_TYPE_EAC3};
 use decode::joc::Joc;
 use openjoc_api::OpenJocConfig;
 use openjoc_scene::SpeakerLayout;
 
-const USAGE: &str = "usage: atmos67 (--layout PRESET | --layout-file LAYOUT.json) < capture.s16le > speakers.f32le
+const USAGE: &str = "usage: atmos67 (--layout PRESET | --layout-file LAYOUT.json) [--input-channels 2|8] [--input-rate HZ] < capture.s16le > speakers.f32le
        atmos67 (--layout PRESET | --layout-file LAYOUT.json) --aes67-sources > status.json";
 
-/// HDMI carries E-AC-3 in a stereo 16-bit stream at four times the audio
-/// rate, so one output frame corresponds to 4 input frames of 4 bytes.
-const INPUT_BYTES_PER_OUTPUT_FRAME: u64 = 16;
+const OUTPUT_RATE: u64 = 48_000;
 
 /// How far output may trail the input clock before silence is inserted. Two
-/// access units: steady decoding trails by about one and never triggers it.
+/// E-AC-3 access units: steady decoding trails by about one and never
+/// triggers it.
 const MAX_LAG_FRAMES: u64 = 2 * 1536;
 
-/// Input without an E-AC-3 burst that counts as the stream having stopped:
-/// one and a half burst periods (a burst repeats every 1,536 output frames).
-const GAP_BYTES: u64 = 1536 * INPUT_BYTES_PER_OUTPUT_FRAME * 3 / 2;
+/// Output frames without a decodable burst that count as the stream having
+/// stopped: one and a half E-AC-3 burst periods.
+const GAP_FRAMES: u64 = 1536 * 3 / 2;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let mut args: Vec<String> = std::env::args().skip(1).collect();
-    let print_sources = args.last().is_some_and(|arg| arg == "--aes67-sources");
-    if print_sources {
-        args.pop();
-    }
-    let config = match args.as_slice() {
-        [flag, name] if flag == "--layout" => OpenJocConfig {
-            speaker_layout: name.clone(),
-            ..OpenJocConfig::default()
-        },
-        [flag, path] if flag == "--layout-file" => {
-            OpenJocConfig::default().with_speaker_layout(SpeakerLayout::from_json_file(path)?)
+    let mut config = None;
+    let mut input_channels = 2usize;
+    // HDMI carries compressed audio at four times the 48 kHz audio rate.
+    let mut input_rate = 192_000u32;
+    let mut print_sources = false;
+    let mut args = std::env::args().skip(1);
+    while let Some(flag) = args.next() {
+        let mut value = || args.next().ok_or(USAGE);
+        match flag.as_str() {
+            "--layout" => {
+                config = Some(OpenJocConfig {
+                    speaker_layout: value()?,
+                    ..OpenJocConfig::default()
+                });
+            }
+            "--layout-file" => {
+                let layout = SpeakerLayout::from_json_file(value()?)?;
+                config = Some(OpenJocConfig::default().with_speaker_layout(layout));
+            }
+            "--input-channels" => input_channels = value()?.parse()?,
+            "--input-rate" => input_rate = value()?.parse()?,
+            "--aes67-sources" => print_sources = true,
+            _ => return Err(USAGE.into()),
         }
-        _ => return Err(USAGE.into()),
+    }
+    let config = config.ok_or(USAGE)?;
+    if !matches!(input_channels, 2 | 8) || input_rate == 0 {
+        return Err(USAGE.into());
+    }
+    // Output frames that `bytes` of capture last for.
+    let frames_in = |bytes: u64| {
+        bytes / (input_channels as u64 * 2) * OUTPUT_RATE / u64::from(input_rate)
     };
     let mut joc = Joc::new(config)?;
     let info = joc.output_info();
@@ -68,7 +86,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         channels: info.channel_count,
         frames: 0,
     };
-    let mut depacketizer = Depacketizer::default();
+    let mut capture = Capture::new(input_channels, input_rate);
     let mut chunk = [0u8; 16384];
     let mut decoded = Vec::new();
     let mut input_bytes = 0u64;
@@ -81,8 +99,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             break;
         }
         input_bytes += n as u64;
-        depacketizer.feed(&chunk[..n]);
-        while let Some((data_type, payload)) = depacketizer.next_burst() {
+        capture.feed(&chunk[..n]);
+        while let Some((data_type, payload)) = capture.next_burst() {
             if data_type != DATA_TYPE_EAC3 {
                 // Null/pause bursts (0, 3) are normal filler; report anything else once.
                 if !matches!(data_type, 0 | 3) && last_skipped != Some(data_type) {
@@ -102,7 +120,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
         }
-        if last_burst_at.is_some_and(|at| input_bytes - at > GAP_BYTES) {
+        if last_burst_at.is_some_and(|at| frames_in(input_bytes - at) > GAP_FRAMES) {
             joc.flush(&mut decoded);
             last_burst_at = None;
         }
@@ -110,7 +128,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         decoded.clear();
         // The sink downstream runs on the capture clock. Whenever no audio was
         // decoded (pause, PCM source, dropped bursts), fill the gap with silence.
-        let due = (input_bytes / INPUT_BYTES_PER_OUTPUT_FRAME).saturating_sub(MAX_LAG_FRAMES);
+        let due = frames_in(input_bytes).saturating_sub(MAX_LAG_FRAMES);
         output.write_silence(due.saturating_sub(output.frames))?;
     }
     joc.flush(&mut decoded);
