@@ -1,6 +1,6 @@
-//! Reads HDMI capture (S16LE PCM carrying IEC 61937 bursts) on stdin, decodes
-//! E-AC-3 / E-AC-3 JOC (Dolby Digital Plus Atmos) and renders it to the given
-//! speaker layout, writing interleaved FLOAT32LE PCM on stdout.
+//! Reads HDMI capture (S16LE stereo PCM carrying IEC 61937 bursts) on stdin,
+//! decodes E-AC-3 / E-AC-3 JOC (Dolby Digital Plus Atmos) and renders it to the
+//! given speaker layout, writing interleaved FLOAT32LE PCM on stdout.
 
 mod iec61937;
 
@@ -12,6 +12,18 @@ use openjoc_api::{OpenJocConfig, OpenJocPacket, OpenJocSession, OpenJocStatus};
 use openjoc_scene::SpeakerLayout;
 
 const USAGE: &str = "usage: atmos67 (--layout PRESET | --layout-file LAYOUT.json) < capture.s16le > speakers.f32le";
+
+/// HDMI carries E-AC-3 in a stereo 16-bit stream at four times the audio
+/// rate, so one output frame corresponds to 4 input frames of 4 bytes.
+const INPUT_BYTES_PER_OUTPUT_FRAME: u64 = 16;
+
+/// How far output may trail the input clock before silence is inserted. Two
+/// access units: steady decoding trails by about one and never triggers it.
+const MAX_LAG_FRAMES: u64 = 2 * 1536;
+
+/// Input without an E-AC-3 burst that counts as the stream having stopped:
+/// one and a half burst periods (a burst repeats every 1,536 output frames).
+const GAP_BYTES: u64 = 1536 * INPUT_BYTES_PER_OUTPUT_FRAME * 3 / 2;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -34,15 +46,23 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     let mut stdin = io::stdin().lock();
-    let mut stdout = io::stdout().lock();
+    let mut output = Output {
+        out: io::stdout().lock(),
+        channels: info.channel_count,
+        frames: 0,
+    };
     let mut depacketizer = Depacketizer::default();
     let mut chunk = [0u8; 16384];
+    let mut input_bytes = 0u64;
     let mut last_skipped = None;
+    let mut decoding = false;
+    let mut last_burst_at = 0u64;
     loop {
         let n = stdin.read(&mut chunk)?;
         if n == 0 {
             break;
         }
+        input_bytes += n as u64;
         depacketizer.feed(&chunk[..n]);
         while let Some((data_type, payload)) = depacketizer.next_burst() {
             if data_type != DATA_TYPE_EAC3 {
@@ -60,10 +80,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                 preroll: false,
             };
             loop {
-                write_frames(&mut session, &mut stdout)?;
+                output.write_decoded(&mut session)?;
                 match session.push_packet(packet) {
                     Ok(OpenJocStatus::OutputPending) => {}
-                    Ok(_) => break,
+                    Ok(_) => {
+                        decoding = true;
+                        last_burst_at = input_bytes;
+                        break;
+                    }
                     Err(error) => {
                         // A damaged burst must not end a live stream: drop it and resync.
                         eprintln!("atmos67: dropped access unit: {error}");
@@ -72,23 +96,53 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                 }
             }
-            write_frames(&mut session, &mut stdout)?;
+            output.write_decoded(&mut session)?;
         }
+        if decoding && input_bytes - last_burst_at > GAP_BYTES {
+            // Bursts stopped. The decoder holds back the last access unit;
+            // play it out now rather than after the stream resumes.
+            session.drain()?;
+            output.write_decoded(&mut session)?;
+            session.try_reset()?;
+            decoding = false;
+        }
+        // The sink downstream runs on the capture clock. Whenever no audio was
+        // decoded (pause, PCM source, dropped bursts), fill the gap with silence.
+        let due = (input_bytes / INPUT_BYTES_PER_OUTPUT_FRAME).saturating_sub(MAX_LAG_FRAMES);
+        output.write_silence(due.saturating_sub(output.frames))?;
     }
     session.drain()?;
-    write_frames(&mut session, &mut stdout)?;
+    output.write_decoded(&mut session)?;
     Ok(())
 }
 
-fn write_frames(session: &mut OpenJocSession, out: &mut impl Write) -> io::Result<()> {
-    while let Some(frame) = session.receive_frame() {
-        let bytes: Vec<u8> = frame
-            .interleaved_f32
-            .iter()
-            .flat_map(|sample| sample.to_le_bytes())
-            .collect();
-        out.write_all(&bytes)?;
-        out.flush()?;
+struct Output<W> {
+    out: W,
+    channels: usize,
+    frames: u64,
+}
+
+impl<W: Write> Output<W> {
+    fn write_decoded(&mut self, session: &mut OpenJocSession) -> io::Result<()> {
+        while let Some(frame) = session.receive_frame() {
+            let bytes: Vec<u8> = frame
+                .interleaved_f32
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect();
+            self.out.write_all(&bytes)?;
+            self.out.flush()?;
+            self.frames += frame.sample_count as u64;
+        }
+        Ok(())
     }
-    Ok(())
+
+    fn write_silence(&mut self, frames: u64) -> io::Result<()> {
+        if frames > 0 {
+            self.out.write_all(&vec![0u8; frames as usize * self.channels * 4])?;
+            self.out.flush()?;
+            self.frames += frames;
+        }
+        Ok(())
+    }
 }

@@ -29,6 +29,8 @@ fn run(args: &[&str], input: &[u8]) -> Vec<f32> {
 const SPDIF: &[u8] = include_bytes!("fixtures/joc.spdif");
 /// OpenJOC flushes its internal delay as extra frames when the stream ends.
 const DRAIN_TAIL_FRAMES: usize = 32;
+/// Mirrors `MAX_LAG_FRAMES` in `src/main.rs`.
+const MAX_LAG_FRAMES: usize = 2 * 1536;
 const LAYOUT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/layout-5.1.2.json");
 
 #[test]
@@ -48,7 +50,30 @@ fn survives_a_corrupted_burst() {
     let samples = run(&["--layout", "5.1"], &damaged);
     assert_eq!(samples.len() % 6, 0);
     let frames = samples.len() / 6;
-    // Whole access units on both sides of the damage, plus the end-of-stream tail.
-    assert!(frames >= 3 * 1536, "only {frames} frames survived");
-    assert_eq!(frames % 1536, DRAIN_TAIL_FRAMES);
+    // Lost audio is replaced by silence, so output stays on the input clock.
+    assert!(frames >= 6 * 1536 - MAX_LAG_FRAMES, "only {frames} frames");
+    assert!(frames <= 6 * 1536 + DRAIN_TAIL_FRAMES, "{frames} frames");
+    assert!(samples[samples.len() - 1536 * 6..].iter().any(|s| *s != 0.0));
+}
+
+#[test]
+fn pcm_input_becomes_silence_on_the_capture_clock() {
+    // 10,000 output frames' worth of plain PCM (16 input bytes per output frame).
+    let samples = run(&["--layout", "5.1"], &vec![0u8; 16 * 10_000]);
+    assert_eq!(samples.len(), (10_000 - MAX_LAG_FRAMES) * 6);
+    assert!(samples.iter().all(|s| *s == 0.0));
+}
+
+#[test]
+fn silence_fills_the_gap_after_bursts_stop() {
+    let mut input = SPDIF.to_vec();
+    input.extend(vec![0u8; 16 * 8_000]);
+    let samples = run(&["--layout", "5.1"], &input);
+    // Output follows the input clock (6 access units + 8,000 frames) minus the
+    // allowed lag; the decoder is flushed before the silence, not at the end.
+    let frames = 6 * 1536 + 8_000 - MAX_LAG_FRAMES;
+    assert_eq!(samples.len(), frames * 6);
+    let decoded = (6 * 1536 + DRAIN_TAIL_FRAMES) * 6;
+    assert!(samples[decoded - 1536 * 6..decoded].iter().any(|s| *s != 0.0));
+    assert!(samples[decoded..].iter().all(|s| *s == 0.0));
 }
