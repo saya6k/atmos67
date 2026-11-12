@@ -65,6 +65,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut chunk = [0u8; 16384];
     let mut input_bytes = 0u64;
     let mut last_skipped = None;
+    let mut last_error = None;
     let mut decoding = false;
     let mut last_burst_at = 0u64;
     loop {
@@ -100,7 +101,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                     Err(error) => {
                         // A damaged burst must not end a live stream: drop it and resync.
-                        eprintln!("atmos67: dropped access unit: {error}");
+                        let message = error.to_string();
+                        if last_error.as_ref() != Some(&message) {
+                            eprintln!("atmos67: dropping access units: {message}");
+                            last_error = Some(message);
+                        }
                         session.try_reset()?;
                         break;
                     }

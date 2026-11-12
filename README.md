@@ -11,11 +11,12 @@ arecord ─> atmos67 ─> CamillaDSP ─> RAVENNA ALSA 장치 ─> AES67 (RTP)
 
 | 입력 | 상태 |
 |---|---|
-| E-AC-3 JOC (Dolby Digital Plus Atmos), E-AC-3 | 지원. [OpenJOC](https://github.com/chyinan/OpenJOC)로 디코딩·렌더합니다. |
+| E-AC-3 JOC (Dolby Digital Plus Atmos) | 지원. [OpenJOC](https://github.com/chyinan/OpenJOC)로 디코딩·렌더합니다. |
+| Atmos가 아닌 E-AC-3, AC-3 | 미지원. 무음을 냅니다. |
 | TrueHD Atmos, MAT 2.0 PCM | 미지원. 건너뛰고 무음을 냅니다. |
 | PCM, 일시정지 | 무음을 냅니다. |
 
-검증은 합성 샘플을 쓴 자동 테스트까지입니다. 실제 HDMI 입력, 실시간 성능, AES67 송출은 실기에서 확인하지 않았습니다.
+자동 테스트는 합성 샘플을 쓰고, 실제 콘텐츠는 아래 "실제 샘플 시험"처럼 파일로 확인했습니다. 실제 HDMI 입력과 AES67 송출은 실기에서 확인하지 않았습니다.
 
 ## 빌드
 
@@ -95,6 +96,18 @@ arecord -D hw:HDMIIN -f S16_LE -c 2 -r 192000 -t raw \
 
 - 손상된 버스트는 버리고 다음 버스트부터 다시 디코딩합니다.
 - 디코딩된 오디오가 없는 구간(일시정지, PCM, 미지원 포맷)은 무음으로 채워 출력이 캡처 클록을 따라가게 합니다.
+
+## 실제 샘플 시험
+
+공개 테스트 파일의 E-AC-3 트랙 앞 60초를 FFmpeg로 IEC 61937에 담아 `--layout 7.1.4`로 디코딩한 결과입니다.
+
+| 샘플 | 결과 |
+|---|---|
+| E-AC-3 JOC 5.1.2, 7.1.2, 7.1.4, 9.1.6, 24.1.13, "7.1.4 master with 5.1 bed" | 디코딩됨 (5.1.2 샘플에서 액세스 유닛 1개 버림) |
+| Atmos test tones 1000Hz V4 | 전부 무음. OpenJOC가 `OAMD warp mode 2`를 거부합니다. |
+| Atmos가 아닌 E-AC-3 5.1, 7.1 | 전부 무음. OpenJOC는 JOC가 없는 E-AC-3를 디코딩하지 않습니다. |
+
+채널을 하나씩 호명하는 7.1.4 샘플에서 베드 채널(FL, FR, FC, LFE, Ls, Rs)은 해당 스피커에서만 나옵니다. 객체로 실린 채널(Lb, Rb, 천장 4개)은 맞는 스피커가 가장 크지만 이웃 스피커에도 2~3 dB 낮게 함께 나옵니다.
 
 ## 성능
 
