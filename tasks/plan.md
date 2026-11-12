@@ -73,7 +73,7 @@
 
 ## 4단계: 마무리
 
-- [ ] **T13. 클록·성능·문서** — 출력 길이(기준 6)와 문서(기준 8)는 끝. 성능(기준 7)은 TrueHD 2.6배, TrueHD Atmos 1.7배, E-AC-3 JOC 2.0배로 3배에 못 미침. 결정 필요.
+- [x] **T13. 클록·성능·문서**
   - Acceptance: 모든 경로에서 출력 길이가 입력에 대응(성공 기준 6), ARM VM에서 실시간의 3배 이상(기준 7), README의 지원 표·실행법(`--input-channels`)·샘플 결과가 실제와 일치(기준 8).
   - Verify: 샘플 시험 + 벤치마크 스크립트 결과를 README에 기록
   - Files: `tests/samples.rs`, `README.md`
