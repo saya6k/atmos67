@@ -20,12 +20,16 @@ arecord ─> atmos67 ─> CamillaDSP ─> RAVENNA ALSA 장치 ─> AES67 (RTP)
 
 ## 빌드
 
-Rust 1.89 이상이 필요합니다.
+Rust 1.95(`rust-toolchain.toml`로 고정)와 FFmpeg 개발 라이브러리, clang이 필요합니다. rustc 1.99는 `truehd` 크레이트를 컴파일하다 메모리가 부족해집니다.
 
 ```sh
+apk add ffmpeg-dev clang-dev pkgconf musl-dev   # Alpine (FFmpeg 8.0에서 확인)
+
 cargo build --release
 cargo test
 ```
+
+musl(Alpine)에서는 `RUSTFLAGS="-C target-feature=-crt-static"`이 필요합니다.
 
 ## 스피커 배치
 

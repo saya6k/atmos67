@@ -1,0 +1,5 @@
+[toolchain]
+# rustc 1.99 runs out of memory compiling the truehd crate; 1.95 is the
+# version truehd itself targets.
+channel = "1.95.0"
+components = ["clippy"]

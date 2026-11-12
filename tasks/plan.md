@@ -5,7 +5,7 @@
 
 ## 1단계: 기반
 
-- [ ] **T1. 의존성과 빌드 환경**
+- [x] **T1. 의존성과 빌드 환경**
   - Acceptance: `truehd`, `ffmpeg-next`가 링크된 상태로 기존 시험 10개가 통과한다. 컨테이너 빌드에 필요한 패키지가 README에 적혀 있다.
   - Verify: `cargo test`, `cargo clippy --all-targets -- -D warnings`
   - Files: `Cargo.toml`, `Cargo.lock`, `README.md`

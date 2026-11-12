@@ -6,6 +6,8 @@ rust-version = "1.89"
 description = "HDMI Atmos bitstream to per-speaker PCM bridge for an AES67 output chain"
 
 [dependencies]
+ffmpeg-next = { version = "9.1.0", default-features = false, features = ["codec", "format"] }
 # OpenJOC is not on crates.io; pinned to the commit this was tested against.
 openjoc-api = { git = "https://github.com/chyinan/OpenJOC", rev = "893425751b7800632e8826d05bdef649e01faea6", default-features = false }
 openjoc-scene = { git = "https://github.com/chyinan/OpenJOC", rev = "893425751b7800632e8826d05bdef649e01faea6" }
+truehd = "0.7.2"
