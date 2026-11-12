@@ -67,6 +67,11 @@ pub fn nominal_direction(label: &str) -> Option<Direction> {
         "Rtm" => (90.0, 45.0),
         "TBL" => (-135.0, 45.0),
         "TBR" => (135.0, 45.0),
+        "FLC" => (-15.0, 0.0),
+        "FRC" => (15.0, 0.0),
+        "TFC" => (0.0, 45.0),
+        "TBC" => (180.0, 45.0),
+        "TC" => (0.0, 90.0),
         _ => return None,
     };
     Some(direction(azimuth, elevation))

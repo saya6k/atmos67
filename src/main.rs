@@ -1,22 +1,22 @@
 //! Reads HDMI capture (S16LE PCM, stereo or 8-channel, carrying IEC 61937
-//! bursts) on stdin,
-//! decodes E-AC-3 / E-AC-3 JOC (Dolby Digital Plus Atmos) and renders it to the
-//! given speaker layout, writing interleaved FLOAT32LE PCM on stdout.
+//! bursts) on stdin, decodes the audio and renders it to the given speaker
+//! layout, writing interleaved FLOAT32LE PCM on stdout.
 
 mod aes67;
 mod decode;
 mod iec61937;
-// Not wired in until the channel-based decoders arrive (T7).
-#[allow(dead_code)]
 mod layout;
-#[allow(dead_code)]
 mod render;
 
 use std::error::Error;
 use std::io::{self, Read, Write};
 
-use iec61937::{Capture, DATA_TYPE_EAC3};
+use decode::eac3::Eac3;
+use decode::ffmpeg::{Ffmpeg, Id};
 use decode::joc::Joc;
+use iec61937::{Capture, DATA_TYPE_AC3, DATA_TYPE_EAC3};
+use layout::Layout;
+use render::Panner;
 use openjoc_api::OpenJocConfig;
 use openjoc_scene::SpeakerLayout;
 
@@ -35,7 +35,7 @@ const MAX_LAG_FRAMES: u64 = 2 * 1536;
 const GAP_FRAMES: u64 = 1536 * 3 / 2;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let mut config = None;
+    let mut speakers = None;
     let mut input_channels = 2usize;
     // HDMI carries compressed audio at four times the 48 kHz audio rate.
     let mut input_rate = 192_000u32;
@@ -44,32 +44,29 @@ fn main() -> Result<(), Box<dyn Error>> {
     while let Some(flag) = args.next() {
         let mut value = || args.next().ok_or(USAGE);
         match flag.as_str() {
-            "--layout" => {
-                config = Some(OpenJocConfig {
-                    speaker_layout: value()?,
-                    ..OpenJocConfig::default()
-                });
-            }
-            "--layout-file" => {
-                let layout = SpeakerLayout::from_json_file(value()?)?;
-                config = Some(OpenJocConfig::default().with_speaker_layout(layout));
-            }
+            "--layout" => speakers = Some(SpeakerLayout::preset(&value()?)?),
+            "--layout-file" => speakers = Some(SpeakerLayout::from_json_file(value()?)?),
             "--input-channels" => input_channels = value()?.parse()?,
             "--input-rate" => input_rate = value()?.parse()?,
             "--aes67-sources" => print_sources = true,
             _ => return Err(USAGE.into()),
         }
     }
-    let config = config.ok_or(USAGE)?;
+    let speakers = speakers.ok_or(USAGE)?;
     if !matches!(input_channels, 2 | 8) || input_rate == 0 {
         return Err(USAGE.into());
     }
+    let layout = Layout::from_openjoc(&speakers)?;
+    let panner = Panner::new(&layout);
+    let config = OpenJocConfig::default().with_speaker_layout(speakers);
     // Output frames that `bytes` of capture last for.
     let frames_in = |bytes: u64| {
         bytes / (input_channels as u64 * 2) * OUTPUT_RATE / u64::from(input_rate)
     };
-    let mut joc = Joc::new(config)?;
+    let joc = Joc::new(config)?;
     let info = joc.output_info();
+    let mut eac3 = Eac3::new(joc);
+    let mut ac3 = None;
     if print_sources {
         print!("{}", aes67::status_json(info.channel_count));
         return Ok(());
@@ -101,15 +98,27 @@ fn main() -> Result<(), Box<dyn Error>> {
         input_bytes += n as u64;
         capture.feed(&chunk[..n]);
         while let Some((data_type, payload)) = capture.next_burst() {
-            if data_type != DATA_TYPE_EAC3 {
-                // Null/pause bursts (0, 3) are normal filler; report anything else once.
-                if !matches!(data_type, 0 | 3) && last_skipped != Some(data_type) {
-                    eprintln!("atmos67: skipping unsupported IEC 61937 data type {data_type:#04x}");
-                    last_skipped = Some(data_type);
+            let result = match data_type {
+                DATA_TYPE_EAC3 => eac3.decode(payload, &layout, &panner, &mut decoded),
+                DATA_TYPE_AC3 => {
+                    if ac3.is_none() {
+                        ac3 = Some(Ffmpeg::new(Id::AC3)?);
+                    }
+                    let ac3 = ac3.as_mut().expect("created above");
+                    ac3.decode(payload, &layout, &panner, &mut decoded)
                 }
-                continue;
-            }
-            match joc.decode(payload, &mut decoded) {
+                _ => {
+                    // Null/pause bursts (0, 3) are normal filler; report anything else once.
+                    if !matches!(data_type, 0 | 3) && last_skipped != Some(data_type) {
+                        eprintln!(
+                            "atmos67: skipping unsupported IEC 61937 data type {data_type:#04x}"
+                        );
+                        last_skipped = Some(data_type);
+                    }
+                    continue;
+                }
+            };
+            match result {
                 Ok(()) => last_burst_at = Some(input_bytes),
                 // A damaged burst must not end a live stream: it is dropped.
                 Err(message) => {
@@ -121,7 +130,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
         if last_burst_at.is_some_and(|at| frames_in(input_bytes - at) > GAP_FRAMES) {
-            joc.flush(&mut decoded);
+            eac3.flush(&mut decoded);
+            if let Some(ac3) = &mut ac3 {
+                ac3.reset();
+            }
             last_burst_at = None;
         }
         output.write(&decoded)?;
@@ -131,7 +143,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let due = frames_in(input_bytes).saturating_sub(MAX_LAG_FRAMES);
         output.write_silence(due.saturating_sub(output.frames))?;
     }
-    joc.flush(&mut decoded);
+    eac3.flush(&mut decoded);
     output.write(&decoded)?;
     Ok(())
 }

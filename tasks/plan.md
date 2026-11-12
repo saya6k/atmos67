@@ -38,7 +38,7 @@
 
 ## 2단계: FFmpeg 경로
 
-- [ ] **T7. AC-3와 JOC 없는 E-AC-3** (`src/decode/ffmpeg.rs`)
+- [x] **T7. AC-3와 JOC 없는 E-AC-3** (`src/decode/ffmpeg.rs`)
   - Acceptance: 채널마다 다른 주파수의 사인파로 만든 AC-3 5.1, E-AC-3 5.1 픽스처가 같은 배치에서 맞는 채널로만 나온다. 48 kHz가 아니면 알리고 무음.
   - Verify: E2E + 샘플 시험(성공 기준 1의 AC-3, E-AC-3 5.1/7.1)
   - Files: `src/decode/ffmpeg.rs`, `src/main.rs`, `tests/e2e.rs`, `tests/samples.rs`, `tests/fixtures/*`

@@ -106,3 +106,49 @@ fn input_rate_sets_the_silence_clock() {
     let samples = run(&["--layout", "5.1", "--input-rate", "48000"], &vec![0u8; 4 * 10_000]);
     assert_eq!(samples.len(), (10_000 - MAX_LAG_FRAMES) * 6);
 }
+
+/// Amplitude of the `hz` component of one channel over a whole number of cycles.
+fn tone(samples: &[f32], channels: usize, channel: usize, hz: f64) -> f64 {
+    // 0.1 s to 0.3 s: clear of codec ramp-up, and whole cycles of every test tone.
+    let (start, len) = (4_800, 9_600);
+    let (mut re, mut im) = (0.0, 0.0);
+    for i in 0..len {
+        let x = f64::from(samples[(start + i) * channels + channel]);
+        let phase = 2.0 * std::f64::consts::PI * hz * i as f64 / 48_000.0;
+        re += x * phase.cos();
+        im += x * phase.sin();
+    }
+    2.0 * (re * re + im * im).sqrt() / len as f64
+}
+
+/// The tone fixtures carry a different frequency at amplitude 0.25 in each of
+/// FL, FR, FC, LFE, SL, SR. FFmpeg made them, for example:
+/// `ffmpeg -f lavfi -i "aevalsrc=exprs='0.25*sin(2*PI*300*t)|...':channel_layout=5.1(side):duration=0.4" -c:a ac3 -b:a 448k -f spdif tones-ac3-5.1.spdif`
+const TONES: [f64; 6] = [300.0, 450.0, 600.0, 60.0, 750.0, 900.0];
+
+fn assert_each_tone_in_its_own_channel(samples: &[f32]) {
+    assert!(samples.len() >= 19_200 * 6, "{} samples", samples.len());
+    for (channel, own) in TONES.iter().enumerate() {
+        for hz in TONES {
+            let amplitude = tone(samples, 6, channel, hz);
+            if hz == *own {
+                assert!((amplitude - 0.25).abs() < 0.02, "channel {channel}: {hz} Hz at {amplitude}");
+            } else {
+                assert!(amplitude < 0.0025, "channel {channel}: {hz} Hz leaks at {amplitude}");
+            }
+        }
+    }
+}
+
+#[test]
+fn ac3_channels_reach_their_speakers() {
+    // AC-3 travels at the audio rate, not four times it.
+    let input = include_bytes!("fixtures/tones-ac3-5.1.spdif");
+    assert_each_tone_in_its_own_channel(&run(&["--layout", "5.1", "--input-rate", "48000"], input));
+}
+
+#[test]
+fn eac3_without_atmos_plays_its_channel_bed() {
+    let input = include_bytes!("fixtures/tones-eac3-5.1.spdif");
+    assert_each_tone_in_its_own_channel(&run(&["--layout", "5.1"], input));
+}

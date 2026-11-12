@@ -7,6 +7,7 @@
 const SYNC: [u8; 4] = [0x72, 0xF8, 0x1F, 0x4E]; // Pa = 0xF872, Pb = 0x4E1F as LE words
 const HEADER_BYTES: usize = 8;
 
+pub const DATA_TYPE_AC3: u8 = 0x01;
 pub const DATA_TYPE_EAC3: u8 = 0x15;
 pub const DATA_TYPE_DTS_HD: u8 = 0x11;
 pub const DATA_TYPE_MAT: u8 = 0x16;
