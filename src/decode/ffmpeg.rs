@@ -4,6 +4,7 @@
 
 use ffmpeg_next::format::Sample;
 use ffmpeg_next::format::sample::Type;
+use ffmpeg_next::codec::Profile;
 use ffmpeg_next::{ChannelLayout, Packet, codec, frame};
 
 use crate::layout::Layout;
@@ -95,6 +96,13 @@ impl Ffmpeg {
             }
         }
         Ok(())
+    }
+
+    /// Whether the DTS stream last decoded carries DTS:X objects, which
+    /// libavcodec recognises but does not render. It reports them as profiles
+    /// this binding has no name for; every other DTS profile has one.
+    pub fn is_dts_x(&self) -> bool {
+        self.id == Id::DTS && self.bed.is_some() && self.decoder.profile() == Profile::Unknown
     }
 
     /// Forgets the stream so far, for when it stops or changes.

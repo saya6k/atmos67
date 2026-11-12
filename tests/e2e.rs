@@ -126,12 +126,16 @@ fn tone(samples: &[f32], channels: usize, channel: usize, hz: f64) -> f64 {
 /// `ffmpeg -f lavfi -i "aevalsrc=exprs='0.25*sin(2*PI*300*t)|...':channel_layout=5.1(side):duration=0.4" -c:a ac3 -b:a 448k -f spdif tones-ac3-5.1.spdif`
 const TONES: [f64; 6] = [300.0, 450.0, 600.0, 60.0, 750.0, 900.0];
 
-fn assert_each_tone_in_its_own_channel(samples: &[f32]) {
+/// `lfe_floor` is the least amplitude accepted for the LFE tone: FFmpeg's
+/// experimental DTS encoder stores that channel well below its input level.
+fn assert_each_tone_in_its_own_channel(samples: &[f32], lfe_floor: f64) {
     assert!(samples.len() >= 19_200 * 6, "{} samples", samples.len());
     for (channel, own) in TONES.iter().enumerate() {
         for hz in TONES {
             let amplitude = tone(samples, 6, channel, hz);
-            if hz == *own {
+            if hz == *own && channel == 3 {
+                assert!((lfe_floor..0.27).contains(&amplitude), "LFE at {amplitude}");
+            } else if hz == *own {
                 assert!((amplitude - 0.25).abs() < 0.02, "channel {channel}: {hz} Hz at {amplitude}");
             } else {
                 assert!(amplitude < 0.0025, "channel {channel}: {hz} Hz leaks at {amplitude}");
@@ -144,11 +148,17 @@ fn assert_each_tone_in_its_own_channel(samples: &[f32]) {
 fn ac3_channels_reach_their_speakers() {
     // AC-3 travels at the audio rate, not four times it.
     let input = include_bytes!("fixtures/tones-ac3-5.1.spdif");
-    assert_each_tone_in_its_own_channel(&run(&["--layout", "5.1", "--input-rate", "48000"], input));
+    assert_each_tone_in_its_own_channel(&run(&["--layout", "5.1", "--input-rate", "48000"], input), 0.23);
 }
 
 #[test]
 fn eac3_without_atmos_plays_its_channel_bed() {
     let input = include_bytes!("fixtures/tones-eac3-5.1.spdif");
-    assert_each_tone_in_its_own_channel(&run(&["--layout", "5.1"], input));
+    assert_each_tone_in_its_own_channel(&run(&["--layout", "5.1"], input), 0.23);
+}
+
+#[test]
+fn dts_channels_reach_their_speakers() {
+    let input = include_bytes!("fixtures/tones-dts-5.1.spdif");
+    assert_each_tone_in_its_own_channel(&run(&["--layout", "5.1", "--input-rate", "48000"], input), 0.05);
 }

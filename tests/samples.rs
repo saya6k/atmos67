@@ -72,11 +72,11 @@ fn compare(samples: &[f32], reference: &[f32], channels: usize) -> Vec<(f64, f64
 }
 
 /// A channel-based stream rendered on its own layout must equal FFmpeg's
-/// decode of the same stream, channel for channel.
-fn assert_matches_ffmpeg(name: &str, stream: &str, layout: &str, channels: usize, extra: &[&str]) {
-    let Some(path) = sample(name) else { return };
-    let reference = floats(&ffmpeg(&path, stream, &["-f", "f32le", "-c:a", "pcm_f32le"]));
-    let spdif = ffmpeg(&path, stream, &["-c", "copy", "-f", "spdif"]);
+/// decode of the same stream, channel for channel. Returns atmos67's log.
+fn assert_matches_ffmpeg(name: &str, layout: &str, channels: usize, mux: &[&str], extra: &[&str]) -> String {
+    let Some(path) = sample(name) else { return String::new() };
+    let reference = floats(&ffmpeg(&path, "0:a:0", &["-f", "f32le", "-c:a", "pcm_f32le"]));
+    let spdif = ffmpeg(&path, "0:a:0", &[&["-c", "copy"], mux, &["-f", "spdif"]].concat());
     let (samples, log) = atmos67(&[&["--layout", layout], extra].concat(), spdif);
     assert!(samples.len() >= reference.len() * 9 / 10, "{name}: {} of {} samples\n{log}", samples.len(), reference.len());
     for (channel, (ours, theirs, diff)) in compare(&samples, &reference, channels).iter().enumerate() {
@@ -84,24 +84,56 @@ fn assert_matches_ffmpeg(name: &str, stream: &str, layout: &str, channels: usize
         assert!((db(*ours) - db(*theirs)).abs() < 0.5 || *theirs < 1e-6, "{name} channel {channel} level\n{log}");
         assert!(db(*diff) < -60.0, "{name} channel {channel} differs\n{log}");
     }
+    log
+}
+
+/// DTS-HD needs the high-bitrate HDMI mode: eight channels at 192 kHz.
+const DTS_HD: [&str; 2] = ["-dtshd_rate", "768000"];
+const EIGHT_CHANNELS: [&str; 2] = ["--input-channels", "8"];
+
+#[test]
+#[ignore]
+fn dts_hd_ma_5_1_matches_ffmpeg() {
+    assert_matches_ffmpeg("DTS-HD MA 5.1.mkv", "5.1", 6, &DTS_HD, &EIGHT_CHANNELS);
+}
+
+#[test]
+#[ignore]
+fn dts_hd_ma_7_1_matches_ffmpeg() {
+    assert_matches_ffmpeg("DTS-HD MA 7.1.mkv", "7.1", 8, &DTS_HD, &EIGHT_CHANNELS);
+}
+
+#[test]
+#[ignore]
+fn dts_hd_high_resolution_7_1_matches_ffmpeg() {
+    assert_matches_ffmpeg("DTS-HD High Resolution 7.1.dtshd", "7.1", 8, &DTS_HD, &EIGHT_CHANNELS);
+}
+
+#[test]
+#[ignore]
+fn dts_x_plays_its_bed_and_says_objects_are_not_rendered() {
+    let log = assert_matches_ffmpeg("DTS-X 7.1.4.mkv", "7.1", 8, &DTS_HD, &EIGHT_CHANNELS);
+    if sample("DTS-X 7.1.4.mkv").is_some() {
+        assert_eq!(log.matches("DTS:X objects are not rendered").count(), 1, "{log}");
+    }
 }
 
 #[test]
 #[ignore]
 fn ac3_5_1_matches_ffmpeg() {
-    assert_matches_ffmpeg("Dolby Digital AC-3 5.1.mp4", "0:a:0", "5.1", 6, &["--input-rate", "48000"]);
+    assert_matches_ffmpeg("Dolby Digital AC-3 5.1.mp4", "5.1", 6, &[], &["--input-rate", "48000"]);
 }
 
 #[test]
 #[ignore]
 fn eac3_5_1_matches_ffmpeg() {
-    assert_matches_ffmpeg("Dolby Digital Plus E-AC-3 5.1.mp4", "0:a:0", "5.1", 6, &[]);
+    assert_matches_ffmpeg("Dolby Digital Plus E-AC-3 5.1.mp4", "5.1", 6, &[], &[]);
 }
 
 #[test]
 #[ignore]
 fn eac3_7_1_matches_ffmpeg() {
-    assert_matches_ffmpeg("Dolby Digital Plus E-AC-3 7.1.mp4", "0:a:0", "7.1", 8, &[]);
+    assert_matches_ffmpeg("Dolby Digital Plus E-AC-3 7.1.mp4", "7.1", 8, &[], &[]);
 }
 
 fn rms_per_channel(samples: &[f32], channels: usize) -> Vec<f64> {

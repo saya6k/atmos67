@@ -9,6 +9,8 @@ const HEADER_BYTES: usize = 8;
 
 pub const DATA_TYPE_AC3: u8 = 0x01;
 pub const DATA_TYPE_EAC3: u8 = 0x15;
+/// DTS core frames of 512, 1024 and 2048 samples.
+pub const DATA_TYPE_DTS: std::ops::RangeInclusive<u8> = 0x0B..=0x0D;
 pub const DATA_TYPE_DTS_HD: u8 = 0x11;
 pub const DATA_TYPE_MAT: u8 = 0x16;
 
@@ -47,8 +49,8 @@ impl Depacketizer {
             }
             let data_type = rest[4] & 0x7F;
             let pd = usize::from(u16::from_le_bytes([rest[6], rest[7]]));
-            // Pd counts bytes for E-AC-3 and MAT, bits for the older types.
-            let len = if matches!(data_type, DATA_TYPE_EAC3 | DATA_TYPE_MAT) {
+            // Pd counts bytes for E-AC-3, MAT and DTS-HD, bits for the older types.
+            let len = if matches!(data_type, DATA_TYPE_EAC3 | DATA_TYPE_MAT | DATA_TYPE_DTS_HD) {
                 pd
             } else {
                 pd.div_ceil(8)
@@ -67,6 +69,15 @@ impl Depacketizer {
             return Some((data_type, &self.payload));
         }
     }
+}
+
+/// The DTS frame inside a DTS-HD burst, which wraps it in a start code and
+/// a 16-bit length.
+pub fn dts_hd_frame(payload: &[u8]) -> Option<&[u8]> {
+    const START: [u8; 10] = [0x01, 0, 0, 0, 0, 0, 0, 0, 0xFE, 0xFE];
+    let rest = payload.strip_prefix(&START)?;
+    let length = usize::from(u16::from_be_bytes([*rest.first()?, *rest.get(1)?]));
+    rest.get(2..2 + length)
 }
 
 /// Finds bursts in a stereo or 8-channel capture.
@@ -254,5 +265,17 @@ mod tests {
         let got = collect_capture(&mut capture);
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].0, DATA_TYPE_MAT);
+    }
+    #[test]
+    fn dts_hd_burst_is_unwrapped_to_its_frame() {
+        let mut payload = vec![0x01, 0, 0, 0, 0, 0, 0, 0, 0xFE, 0xFE, 0, 3];
+        payload.extend([0x7F, 0xFE, 0x80, 0, 0, 0]); // frame, then padding
+        assert_eq!(dts_hd_frame(&payload), Some(&[0x7F, 0xFE, 0x80][..]));
+        assert_eq!(dts_hd_frame(&payload[..13]), None);
+        assert_eq!(dts_hd_frame(&[0u8; 16]), None);
+        // Its burst length is counted in bytes.
+        let mut d = Depacketizer::default();
+        d.feed(&burst(DATA_TYPE_DTS_HD, 18, &payload));
+        assert_eq!(collect(&mut d), [(DATA_TYPE_DTS_HD, payload)]);
     }
 }

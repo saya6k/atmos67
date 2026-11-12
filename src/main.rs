@@ -14,7 +14,9 @@ use std::io::{self, Read, Write};
 use decode::eac3::Eac3;
 use decode::ffmpeg::{Ffmpeg, Id};
 use decode::joc::Joc;
-use iec61937::{Capture, DATA_TYPE_AC3, DATA_TYPE_EAC3};
+use iec61937::{
+    Capture, DATA_TYPE_AC3, DATA_TYPE_DTS, DATA_TYPE_DTS_HD, DATA_TYPE_EAC3, dts_hd_frame,
+};
 use layout::Layout;
 use render::Panner;
 use openjoc_api::OpenJocConfig;
@@ -67,6 +69,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let info = joc.output_info();
     let mut eac3 = Eac3::new(joc);
     let mut ac3 = None;
+    let mut dts = None;
+    let mut dts_x_reported = false;
     if print_sources {
         print!("{}", aes67::status_json(info.channel_count));
         return Ok(());
@@ -101,11 +105,16 @@ fn main() -> Result<(), Box<dyn Error>> {
             let result = match data_type {
                 DATA_TYPE_EAC3 => eac3.decode(payload, &layout, &panner, &mut decoded),
                 DATA_TYPE_AC3 => {
-                    if ac3.is_none() {
-                        ac3 = Some(Ffmpeg::new(Id::AC3)?);
+                    libav(&mut ac3, Id::AC3)?.decode(payload, &layout, &panner, &mut decoded)
+                }
+                DATA_TYPE_DTS_HD => match dts_hd_frame(payload) {
+                    Some(frame) => {
+                        libav(&mut dts, Id::DTS)?.decode(frame, &layout, &panner, &mut decoded)
                     }
-                    let ac3 = ac3.as_mut().expect("created above");
-                    ac3.decode(payload, &layout, &panner, &mut decoded)
+                    None => Err("malformed DTS-HD burst".to_owned()),
+                },
+                _ if DATA_TYPE_DTS.contains(&data_type) => {
+                    libav(&mut dts, Id::DTS)?.decode(payload, &layout, &panner, &mut decoded)
                 }
                 _ => {
                     // Null/pause bursts (0, 3) are normal filler; report anything else once.
@@ -118,6 +127,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     continue;
                 }
             };
+            if !dts_x_reported && dts.as_ref().is_some_and(Ffmpeg::is_dts_x) {
+                eprintln!("atmos67: DTS:X objects are not rendered; playing the channel bed");
+                dts_x_reported = true;
+            }
             match result {
                 Ok(()) => last_burst_at = Some(input_bytes),
                 // A damaged burst must not end a live stream: it is dropped.
@@ -131,8 +144,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         if last_burst_at.is_some_and(|at| frames_in(input_bytes - at) > GAP_FRAMES) {
             eac3.flush(&mut decoded);
-            if let Some(ac3) = &mut ac3 {
-                ac3.reset();
+            for decoder in [&mut ac3, &mut dts].into_iter().flatten() {
+                decoder.reset();
             }
             last_burst_at = None;
         }
@@ -146,6 +159,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     eac3.flush(&mut decoded);
     output.write(&decoded)?;
     Ok(())
+}
+
+/// The libavcodec decoder in `slot`, created on first use.
+fn libav(slot: &mut Option<Ffmpeg>, id: Id) -> Result<&mut Ffmpeg, String> {
+    if slot.is_none() {
+        *slot = Some(Ffmpeg::new(id)?);
+    }
+    Ok(slot.as_mut().expect("created above"))
 }
 
 struct Output<W> {

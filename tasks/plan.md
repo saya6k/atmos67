@@ -48,7 +48,7 @@
   - Verify: 샘플 시험(성공 기준 2, 5)
   - Files: `src/main.rs`, `src/decode/joc.rs`, `tests/samples.rs`
 
-- [ ] **T9. DTS 계열**
+- [x] **T9. DTS 계열**
   - Acceptance: DTS(타입 0x0B–0x0D)와 DTS-HD(0x11, 서브헤더 해체)가 FFmpeg로 디코딩된다. DTS:X면 객체를 렌더하지 않는다고 한 번 알린다.
   - Verify: E2E(DTS 5.1 픽스처) + 샘플 시험(성공 기준 1의 DTS, 기준 4)
   - Files: `src/decode/ffmpeg.rs`, `src/iec61937.rs`, `src/main.rs`, `tests/*`
