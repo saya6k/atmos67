@@ -4,3 +4,4 @@
 pub mod eac3;
 pub mod ffmpeg;
 pub mod joc;
+pub mod truehd;

@@ -6,7 +6,6 @@ mod aes67;
 mod decode;
 mod iec61937;
 mod layout;
-#[allow(dead_code)] // used from T11 on
 mod mat;
 mod render;
 
@@ -16,8 +15,10 @@ use std::io::{self, Read, Write};
 use decode::eac3::Eac3;
 use decode::ffmpeg::{Ffmpeg, Id};
 use decode::joc::Joc;
+use decode::truehd::TrueHd;
 use iec61937::{
-    Capture, DATA_TYPE_AC3, DATA_TYPE_DTS, DATA_TYPE_DTS_HD, DATA_TYPE_EAC3, dts_hd_frame,
+    Capture, DATA_TYPE_AC3, DATA_TYPE_DTS, DATA_TYPE_DTS_HD, DATA_TYPE_EAC3, DATA_TYPE_MAT,
+    dts_hd_frame,
 };
 use layout::Layout;
 use render::Panner;
@@ -73,6 +74,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut ac3 = None;
     let mut dts = None;
     let mut dts_x_reported = false;
+    let mut truehd = TrueHd::default();
     if print_sources {
         print!("{}", aes67::status_json(info.channel_count));
         return Ok(());
@@ -109,6 +111,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 DATA_TYPE_AC3 => {
                     libav(&mut ac3, Id::AC3)?.decode(payload, &layout, &panner, &mut decoded)
                 }
+                DATA_TYPE_MAT => truehd.decode(payload, &layout, &panner, &mut decoded),
                 DATA_TYPE_DTS_HD => match dts_hd_frame(payload) {
                     Some(frame) => {
                         libav(&mut dts, Id::DTS)?.decode(frame, &layout, &panner, &mut decoded)
@@ -149,6 +152,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             for decoder in [&mut ac3, &mut dts].into_iter().flatten() {
                 decoder.reset();
             }
+            truehd.reset();
             last_burst_at = None;
         }
         output.write(&decoded)?;

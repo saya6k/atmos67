@@ -91,6 +91,13 @@ fn assert_matches_ffmpeg(name: &str, layout: &str, channels: usize, mux: &[&str]
 const DTS_HD: [&str; 2] = ["-dtshd_rate", "768000"];
 const EIGHT_CHANNELS: [&str; 2] = ["--input-channels", "8"];
 
+/// TrueHD travels in MAT frames, also in the high-bitrate mode.
+#[test]
+#[ignore]
+fn truehd_7_1_matches_ffmpeg() {
+    assert_matches_ffmpeg("Dolby TrueHD 7.1.mkv", "7.1", 8, &[], &EIGHT_CHANNELS);
+}
+
 #[test]
 #[ignore]
 fn dts_hd_ma_5_1_matches_ffmpeg() {

@@ -60,7 +60,7 @@
   - Verify: 단위 시험 (FFmpeg로 만든 TrueHD 7.1 MAT 픽스처에서 꺼낸 유닛이 원본 .thd와 바이트 단위로 같음)
   - Files: `src/mat.rs`, `tests/fixtures/*`
 
-- [ ] **T11. TrueHD 채널 기반** (`src/decode/truehd.rs`)
+- [x] **T11. TrueHD 채널 기반** (`src/decode/truehd.rs`)
   - Acceptance: TrueHD 7.1 픽스처와 샘플이 베드로 렌더된다.
   - Verify: E2E + 샘플 시험(성공 기준 1의 TrueHD 7.1)
   - Files: `src/decode/truehd.rs`, `src/main.rs`, `tests/*`

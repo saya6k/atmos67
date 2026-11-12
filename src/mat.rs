@@ -40,11 +40,6 @@ impl Mat {
         Ok(())
     }
 
-    /// Forgets the position in the stream, after an error or a gap.
-    pub fn reset(&mut self) {
-        *self = Self::default();
-    }
-
     fn stream(&mut self, mut bytes: &[u8], out: &mut Vec<u8>) {
         if !self.synced {
             // A major sync starts four bytes into its access unit.
@@ -96,9 +91,9 @@ mod tests {
     use crate::iec61937::{DATA_TYPE_MAT, Depacketizer};
 
     /// The TrueHD stream FFmpeg packed into the MAT fixture:
-    /// `ffmpeg -i tones-truehd-7.1.thd -c copy -f spdif tones-truehd-7.1.spdif`
-    const STREAM: &[u8] = include_bytes!("../tests/fixtures/tones-truehd-7.1.thd");
-    const CAPTURE: &[u8] = include_bytes!("../tests/fixtures/tones-truehd-7.1.spdif");
+    /// `ffmpeg -i tones-truehd-5.1.thd -c copy -f spdif tones-truehd-5.1.spdif`
+    const STREAM: &[u8] = include_bytes!("../tests/fixtures/tones-truehd-5.1.thd");
+    const CAPTURE: &[u8] = include_bytes!("../tests/fixtures/tones-truehd-5.1.spdif");
 
     fn frames() -> Vec<Vec<u8>> {
         let mut depacketizer = Depacketizer::default();

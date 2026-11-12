@@ -107,10 +107,9 @@ fn input_rate_sets_the_silence_clock() {
     assert_eq!(samples.len(), (10_000 - MAX_LAG_FRAMES) * 6);
 }
 
-/// Amplitude of the `hz` component of one channel over a whole number of cycles.
-fn tone(samples: &[f32], channels: usize, channel: usize, hz: f64) -> f64 {
-    // 0.1 s to 0.3 s: clear of codec ramp-up, and whole cycles of every test tone.
-    let (start, len) = (4_800, 9_600);
+/// Amplitude of the `hz` component of one channel between `start` and
+/// `start + len` frames, which must span whole cycles.
+fn tone_in(samples: &[f32], channels: usize, channel: usize, hz: f64, start: usize, len: usize) -> f64 {
     let (mut re, mut im) = (0.0, 0.0);
     for i in 0..len {
         let x = f64::from(samples[(start + i) * channels + channel]);
@@ -119,6 +118,11 @@ fn tone(samples: &[f32], channels: usize, channel: usize, hz: f64) -> f64 {
         im += x * phase.sin();
     }
     2.0 * (re * re + im * im).sqrt() / len as f64
+}
+
+fn tone(samples: &[f32], channels: usize, channel: usize, hz: f64) -> f64 {
+    // 0.1 s to 0.3 s: clear of codec ramp-up, and whole cycles of every test tone.
+    tone_in(samples, channels, channel, hz, 4_800, 9_600)
 }
 
 /// The tone fixtures carry a different frequency at amplitude 0.25 in each of
@@ -161,4 +165,22 @@ fn eac3_without_atmos_plays_its_channel_bed() {
 fn dts_channels_reach_their_speakers() {
     let input = include_bytes!("fixtures/tones-dts-5.1.spdif");
     assert_each_tone_in_its_own_channel(&run(&["--layout", "5.1", "--input-rate", "48000"], input), 0.05);
+}
+
+#[test]
+fn truehd_channels_reach_their_speakers() {
+    // Lossless and only 0.2 s long; carried in MAT as an 8-channel capture.
+    let input = include_bytes!("fixtures/tones-truehd-5.1.spdif");
+    let samples = run(&["--layout", "5.1", "--input-channels", "8"], input);
+    assert!(samples.len() >= 2_400 * 6, "{} samples", samples.len());
+    for (channel, own) in TONES.iter().enumerate() {
+        for hz in TONES {
+            let amplitude = tone_in(&samples, 6, channel, hz, 800, 1_600);
+            if hz == *own {
+                assert!((amplitude - 0.25).abs() < 0.001, "channel {channel}: {hz} Hz at {amplitude}");
+            } else {
+                assert!(amplitude < 0.0001, "channel {channel}: {hz} Hz leaks at {amplitude}");
+            }
+        }
+    }
 }
