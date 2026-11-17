@@ -76,7 +76,7 @@ Kodi ─> 루프백 ─> arecord ─> atmos67 (디코딩·렌더) ─> atmos67 -
 - [x] **D0. Vero V 패키징 커밋.** 지금 커밋하지 않은 작업을 먼저 커밋한다. `SPEC.md`의 가정 5(베이스 매니지먼트는 외부의 일)와 Tech Stack을 이 문서에 맞게 고친다.
 - [x] **D1. 툴체인과 의존성.** (2026-11-18: SECS 0.25.2가 armhf로 빌드되는 것을 확인했다. 쓰이지 않는 의존성 경고를 피하려고 `secs`는 D7에서 다시 넣는다. truehd는 Rust 1.100에서 0.7.2를 병렬 빌드하면 VM 8G를 넘어 0.7.3으로 올렸다.) Rust를 1.100으로 올리고 SECS 크레이트를 추가한다. `Cargo.toml`에 `license = "GPL-3.0-only"`와 `LICENSE`를 둔다. **armhf 교차 빌드가 되는지 가장 먼저 확인한다**(faer, rayon).
   - Verify: armhf로 `cargo test`, clippy
-- [ ] **D2. DSP 기본 요소** (`src/dsp/`): 바이쿼드(Peaking, Allpass, BiquadCombo의 LR/BW 하이패스·로우패스), 지연선, 균일 분할 FFT 컨볼버. 계수는 CamillaDSP와 같은 식(RBJ 쿡북, 버터워스 극 배치)으로 만든다.
+- [x] **D2. DSP 기본 요소** (`src/dsp/`): 바이쿼드(Peaking, Allpass, BiquadCombo의 LR/BW 하이패스·로우패스), 지연선, 균일 분할 FFT 컨볼버. 계수는 CamillaDSP와 같은 식(RBJ 쿡북, 버터워스 극 배치)으로 만든다.
   - Verify: 단위 시험(주파수 응답, 긴 FIR을 직접 컨볼루션한 결과와 비교)
 - [ ] **D3. 설정 해석과 처리기.** SECS의 CamillaDSP yml(위 부분집합)과 FIR WAV를 읽어 파이프라인(필터, 믹서)을 블록 단위로 처리한다.
   - Verify: 성공 기준 1(SECS `Convolution` 내보내기와 비교)

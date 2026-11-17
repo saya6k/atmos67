@@ -12,6 +12,7 @@ ffmpeg-next = { version = "9.1.0", default-features = false, features = ["codec"
 openjoc-api = { git = "https://github.com/chyinan/OpenJOC", rev = "893425751b7800632e8826d05bdef649e01faea6", default-features = false }
 openjoc-scene = { git = "https://github.com/chyinan/OpenJOC", rev = "893425751b7800632e8826d05bdef649e01faea6" }
 truehd = "0.7.3"
+realfft = "3.5"
 
 # rustc needs more than 10 GB of memory to optimize truehd, at any level.
 [profile.release.package.truehd]

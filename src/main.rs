@@ -4,6 +4,9 @@
 
 mod aes67;
 mod decode;
+// Unused until the sender runs it (tasks/dsp.md D4).
+#[allow(dead_code)]
+mod dsp;
 mod iec61937;
 mod layout;
 mod mat;
