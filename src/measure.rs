@@ -5,16 +5,20 @@
 //! sends it contiguously, so every speaker of the position is timed on one
 //! clock. The input is a USB microphone read through `arecord`, converted to
 //! FLOAT32LE by ALSA's plug layer; a session starts recording only once the
-//! first frames arrive, so the sweep's start is never missed.
+//! first frames arrive, so the sweep's start is never missed. When arecord
+//! reports an overrun, samples are missing and every later sweep would seem
+//! to arrive early, so the recording is rejected as having a gap.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Child, ChildStdout, Command, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use secs_audio::{
     AudioBackend, AudioError, CancelToken, CaptureRead, Direction, Endpoint, InputSession, OutputSession,
-    PlaybackReport, ProbeResult, ShareMode, StreamSpec,
+    PlaybackReport, ProbeResult, RecordingIssue, ShareMode, StreamSpec,
 };
 
 const RATE: u32 = 48_000;
@@ -97,7 +101,14 @@ impl AudioBackend for Backend {
                 .chain([spec.channels.to_string()])
                 .collect()
         });
-        Ok(Box::new(Input { command, channels: usize::from(spec.channels), child: None, stdout: None, pending: Vec::new() }))
+        Ok(Box::new(Input {
+            command,
+            channels: usize::from(spec.channels),
+            child: None,
+            stdout: None,
+            overrun: Arc::default(),
+            pending: Vec::new(),
+        }))
     }
 }
 
@@ -113,6 +124,28 @@ impl Backend {
         let probe = self.probe(endpoint, direction, spec, ShareMode::SharedAutoConvert)?;
         if probe.supported { Ok(()) } else { Err(AudioError::UnsupportedFormat(probe.detail)) }
     }
+}
+
+/// Passes on what `child` writes to its standard error, which must be
+/// piped, and raises the returned flag when arecord reports an overrun.
+pub fn watch_overruns(child: &mut Child) -> Arc<AtomicBool> {
+    let overrun = Arc::new(AtomicBool::new(false));
+    if let Some(stderr) = child.stderr.take() {
+        let overrun = Arc::clone(&overrun);
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                if line.contains("overrun") {
+                    overrun.store(true, Ordering::Relaxed);
+                }
+                eprintln!("{line}");
+            }
+        });
+    }
+    overrun
+}
+
+fn gap() -> AudioError {
+    AudioError::Recording { issue: RecordingIssue::Gap, detail: "the microphone's capture overran".into() }
 }
 
 struct Output {
@@ -152,6 +185,7 @@ struct Input {
     channels: usize,
     child: Option<Child>,
     stdout: Option<ChildStdout>,
+    overrun: Arc<AtomicBool>,
     /// Bytes read but not yet handed out.
     pending: Vec<u8>,
 }
@@ -162,9 +196,10 @@ impl InputSession for Input {
         let mut child = Command::new(program)
             .args(args)
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| backend_error(format!("{program}: {e}")))?;
+        self.overrun = watch_overruns(&mut child);
         let mut stdout = child.stdout.take().expect("piped");
         // Recording counts as started once the device delivers.
         let mut first = vec![0u8; 4 * self.channels];
@@ -178,6 +213,9 @@ impl InputSession for Input {
     fn read_into(&mut self, dst: &mut [f32], cancel: &CancelToken) -> Result<CaptureRead, AudioError> {
         if cancel.is_cancelled() {
             return Err(AudioError::Cancelled);
+        }
+        if self.overrun.load(Ordering::Relaxed) {
+            return Err(gap());
         }
         let stdout = self.stdout.as_mut().ok_or_else(|| backend_error("capture not started"))?;
         let frame = 4 * self.channels;
@@ -203,6 +241,10 @@ impl InputSession for Input {
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
             let _ = child.wait();
+        }
+        // Reported once the recording had been read through is a gap too.
+        if self.overrun.load(Ordering::Relaxed) {
+            return Err(gap());
         }
         Ok(())
     }
@@ -270,6 +312,29 @@ mod tests {
         }
         input.stop().unwrap();
         assert_eq!(got, samples);
+        std::fs::remove_file(file).unwrap();
+    }
+
+    #[test]
+    fn rejects_a_recording_arecord_reports_an_overrun_in() {
+        let file = std::env::temp_dir().join(format!("atmos67-overrun-{}", std::process::id()));
+        std::fs::write(&file, vec![0u8; 4 * 4800]).unwrap();
+        let script = format!("cat {}; echo 'overrun!!! (at least 2.5 ms long)' >&2; sleep 1", file.display());
+        let backend = backend(PathBuf::new(), vec!["sh".into(), "-c".into(), script]);
+        let spec = StreamSpec { sample_rate: 48_000, channels: 1 };
+        let mut input = backend.open_input(&endpoint(&backend, "plughw:1,0"), spec, ShareMode::SharedAutoConvert).unwrap();
+        input.start().unwrap();
+        let mut buffer = [0f32; 1024];
+        let mut read = 0;
+        while read < 4800 {
+            match input.read_into(&mut buffer, &CancelToken::new()) {
+                Ok(r) => read += r.frames,
+                Err(_) => break,
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let failed = input.stop();
+        assert!(matches!(failed, Err(AudioError::Recording { issue: RecordingIssue::Gap, .. })), "{failed:?}");
         std::fs::remove_file(file).unwrap();
     }
 

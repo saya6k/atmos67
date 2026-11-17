@@ -95,7 +95,13 @@ pub fn measure(control: &Path, capture: &[String], channel: usize) -> Result<f64
         return Err(format!("the sender has {channels} channels").into());
     }
     let (program, args) = capture.split_first().ok_or("no capture command")?;
-    let mut child = Command::new(program).args(args).stdout(Stdio::piped()).spawn().map_err(|e| format!("{program}: {e}"))?;
+    let mut child = Command::new(program)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("{program}: {e}"))?;
+    let overrun = crate::measure::watch_overruns(&mut child);
     let mut stdout = child.stdout.take().expect("piped");
     let (stop_tx, stop_rx) = mpsc::channel::<()>();
     let recorder = thread::spawn(move || {
@@ -127,6 +133,9 @@ pub fn measure(control: &Path, capture: &[String], channel: usize) -> Result<f64
     let _ = child.kill();
     let _ = child.wait();
     let (bytes, reads) = recorder.join().map_err(|_| "recorder failed")?;
+    if overrun.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err("the microphone's capture overran; measure again".into());
+    }
     let recording: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
     if recording.iter().all(|s| s.abs() < 1e-4) {
         return Err("the microphone heard nothing".into());
