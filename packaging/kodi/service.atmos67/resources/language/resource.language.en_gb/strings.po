@@ -89,3 +89,179 @@ msgstr ""
 msgctxt "#32043"
 msgid "These Kodi settings could not be changed:"
 msgstr ""
+
+msgctxt "#32004"
+msgid "Bass management and levels"
+msgstr ""
+
+msgctxt "#32005"
+msgid "Room correction"
+msgstr ""
+
+msgctxt "#32006"
+msgid "Volume"
+msgstr ""
+
+msgctxt "#32050"
+msgid "Correction"
+msgstr ""
+
+msgctxt "#32051"
+msgid "Off sends the speakers as rendered. Manual applies the crossovers, trims and distances set here. Measured applies the correction from the calibration wizard, with the trims added."
+msgstr ""
+
+msgctxt "#32052"
+msgid "Off"
+msgstr ""
+
+msgctxt "#32053"
+msgid "Manual"
+msgstr ""
+
+msgctxt "#32054"
+msgid "Measured"
+msgstr ""
+
+msgctxt "#32055"
+msgid "Subwoofers"
+msgstr ""
+
+msgctxt "#32056"
+msgid "The LFE and the low end of crossed-over speakers go to the subwoofers, shared equally. With none, speakers play full range and the LFE is dropped."
+msgstr ""
+
+msgctxt "#32057"
+msgid "Crossover slope (dB/octave)"
+msgstr ""
+
+msgctxt "#32058"
+msgid "Linkwitz–Riley crossovers of 12 or 24 dB per octave."
+msgstr ""
+
+msgctxt "#32060"
+msgid "Front crossover (Hz)"
+msgstr ""
+
+msgctxt "#32061"
+msgid "Center crossover (Hz)"
+msgstr ""
+
+msgctxt "#32062"
+msgid "Surround crossover (Hz)"
+msgstr ""
+
+msgctxt "#32063"
+msgid "Back crossover (Hz)"
+msgstr ""
+
+msgctxt "#32064"
+msgid "Top crossover (Hz)"
+msgstr ""
+
+msgctxt "#32065"
+msgid "0 plays these speakers full range. 80 Hz is the THX reference."
+msgstr ""
+
+msgctxt "#32066"
+msgid "Speaker levels and distances"
+msgstr ""
+
+msgctxt "#32067"
+msgid "A level trim and the distance to the main seat for each speaker. Distances become delays, except with a measured correction, which aligns the speakers itself."
+msgstr ""
+
+msgctxt "#32070"
+msgid "Microphone (ALSA device)"
+msgstr ""
+
+msgctxt "#32071"
+msgid "The USB measurement microphone, such as plughw:1,0. arecord -l lists the devices."
+msgstr ""
+
+msgctxt "#32072"
+msgid "Microphone calibration file"
+msgstr ""
+
+msgctxt "#32073"
+msgid "The calibration file that came with the microphone (UMIK-1 and others). Optional."
+msgstr ""
+
+msgctxt "#32074"
+msgid "Measuring positions"
+msgstr ""
+
+msgctxt "#32075"
+msgid "Microphone positions to measure, the first at the main seat."
+msgstr ""
+
+msgctxt "#32076"
+msgid "Start calibration"
+msgstr ""
+
+msgctxt "#32077"
+msgid "Plays a sweep from every speaker at each microphone position and designs the correction with SECS 2R. Takes several minutes; keep the room quiet."
+msgstr ""
+
+msgctxt "#32080"
+msgid "Maximum volume (dB)"
+msgstr ""
+
+msgctxt "#32081"
+msgid "The level at Kodi's 100 %. Kodi's volume spans the 60 dB below it."
+msgstr ""
+
+msgctxt "#32100"
+msgid "Room calibration"
+msgstr ""
+
+msgctxt "#32101"
+msgid "Measure from %d microphone positions? Every speaker will play a sweep in turn."
+msgstr ""
+
+msgctxt "#32102"
+msgid "The atmos67 service did not come back. Check its log."
+msgstr ""
+
+msgctxt "#32103"
+msgid "Preparing the measurement"
+msgstr ""
+
+msgctxt "#32104"
+msgid "Place the microphone at position %d of %d, at ear height, pointing up, and keep quiet."
+msgstr ""
+
+msgctxt "#32105"
+msgid "Measuring position %d"
+msgstr ""
+
+msgctxt "#32106"
+msgid "Designing the correction (several minutes)"
+msgstr ""
+
+msgctxt "#32107"
+msgid "The measured correction is now in use."
+msgstr ""
+
+msgctxt "#32108"
+msgid "Calibration failed:"
+msgstr ""
+
+msgctxt "#32110"
+msgid "Speaker levels and distances"
+msgstr ""
+
+msgctxt "#32111"
+msgid "%s   %+.1f dB   %s m"
+msgstr ""
+
+msgctxt "#32112"
+msgid "%s level trim (dB)"
+msgstr ""
+
+msgctxt "#32113"
+msgid "%s distance (m)"
+msgstr ""
+
+msgctxt "#32114"
+msgid "Could not read the speakers of the current mode."
+msgstr ""

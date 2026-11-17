@@ -89,3 +89,179 @@ msgstr "이제 Kodi가 atmos67로 재생합니다."
 msgctxt "#32043"
 msgid "These Kodi settings could not be changed:"
 msgstr "다음 Kodi 설정을 바꾸지 못했습니다:"
+
+msgctxt "#32004"
+msgid "Bass management and levels"
+msgstr "베이스 매니지먼트·레벨"
+
+msgctxt "#32005"
+msgid "Room correction"
+msgstr "룸 보정"
+
+msgctxt "#32006"
+msgid "Volume"
+msgstr "볼륨"
+
+msgctxt "#32050"
+msgid "Correction"
+msgstr "보정"
+
+msgctxt "#32051"
+msgid "Off sends the speakers as rendered. Manual applies the crossovers, trims and distances set here. Measured applies the correction from the calibration wizard, with the trims added."
+msgstr "끔은 렌더한 그대로 보냅니다. 수동은 여기서 정한 크로스오버, 레벨, 거리를 적용합니다. 측정 보정은 보정 마법사가 만든 보정에 레벨만 더해 적용합니다."
+
+msgctxt "#32052"
+msgid "Off"
+msgstr "끔"
+
+msgctxt "#32053"
+msgid "Manual"
+msgstr "수동"
+
+msgctxt "#32054"
+msgid "Measured"
+msgstr "측정 보정"
+
+msgctxt "#32055"
+msgid "Subwoofers"
+msgstr "서브우퍼"
+
+msgctxt "#32056"
+msgid "The LFE and the low end of crossed-over speakers go to the subwoofers, shared equally. With none, speakers play full range and the LFE is dropped."
+msgstr "LFE와 크로스오버한 스피커의 저역이 서브우퍼로 가며, 서브우퍼들이 똑같이 나눠 냅니다. 0이면 스피커는 풀레인지로 내고 LFE는 버립니다."
+
+msgctxt "#32057"
+msgid "Crossover slope (dB/octave)"
+msgstr "크로스오버 기울기 (dB/옥타브)"
+
+msgctxt "#32058"
+msgid "Linkwitz–Riley crossovers of 12 or 24 dB per octave."
+msgstr "Linkwitz–Riley 12 또는 24 dB/옥타브입니다."
+
+msgctxt "#32060"
+msgid "Front crossover (Hz)"
+msgstr "프런트 크로스오버 (Hz)"
+
+msgctxt "#32061"
+msgid "Center crossover (Hz)"
+msgstr "센터 크로스오버 (Hz)"
+
+msgctxt "#32062"
+msgid "Surround crossover (Hz)"
+msgstr "서라운드 크로스오버 (Hz)"
+
+msgctxt "#32063"
+msgid "Back crossover (Hz)"
+msgstr "백 크로스오버 (Hz)"
+
+msgctxt "#32064"
+msgid "Top crossover (Hz)"
+msgstr "천장 크로스오버 (Hz)"
+
+msgctxt "#32065"
+msgid "0 plays these speakers full range. 80 Hz is the THX reference."
+msgstr "0이면 이 스피커들은 풀레인지로 냅니다. THX 기준은 80 Hz입니다."
+
+msgctxt "#32066"
+msgid "Speaker levels and distances"
+msgstr "스피커별 레벨·거리"
+
+msgctxt "#32067"
+msgid "A level trim and the distance to the main seat for each speaker. Distances become delays, except with a measured correction, which aligns the speakers itself."
+msgstr "스피커마다 레벨 보정과 주 청취 위치까지의 거리를 정합니다. 거리는 지연으로 바뀝니다. 측정 보정은 스스로 시간을 맞추므로 거리를 쓰지 않습니다."
+
+msgctxt "#32070"
+msgid "Microphone (ALSA device)"
+msgstr "마이크 (ALSA 장치)"
+
+msgctxt "#32071"
+msgid "The USB measurement microphone, such as plughw:1,0. arecord -l lists the devices."
+msgstr "USB 측정 마이크입니다. 예: plughw:1,0. 장치 목록은 arecord -l로 봅니다."
+
+msgctxt "#32072"
+msgid "Microphone calibration file"
+msgstr "마이크 보정 파일"
+
+msgctxt "#32073"
+msgid "The calibration file that came with the microphone (UMIK-1 and others). Optional."
+msgstr "마이크와 함께 받은 보정 파일입니다(UMIK-1 등). 없어도 됩니다."
+
+msgctxt "#32074"
+msgid "Measuring positions"
+msgstr "측정 위치 수"
+
+msgctxt "#32075"
+msgid "Microphone positions to measure, the first at the main seat."
+msgstr "측정할 마이크 위치 수입니다. 첫 위치는 주 청취 위치입니다."
+
+msgctxt "#32076"
+msgid "Start calibration"
+msgstr "보정 시작"
+
+msgctxt "#32077"
+msgid "Plays a sweep from every speaker at each microphone position and designs the correction with SECS 2R. Takes several minutes; keep the room quiet."
+msgstr "마이크 위치마다 모든 스피커에서 스윕을 재생하고 SECS 2R로 보정을 설계합니다. 몇 분 걸리며, 그동안 방을 조용히 해 주세요."
+
+msgctxt "#32080"
+msgid "Maximum volume (dB)"
+msgstr "최대 볼륨 (dB)"
+
+msgctxt "#32081"
+msgid "The level at Kodi's 100 %. Kodi's volume spans the 60 dB below it."
+msgstr "Kodi 볼륨 100 %의 레벨입니다. 그 아래로 60 dB 범위를 씁니다."
+
+msgctxt "#32100"
+msgid "Room calibration"
+msgstr "룸 보정"
+
+msgctxt "#32101"
+msgid "Measure from %d microphone positions? Every speaker will play a sweep in turn."
+msgstr "마이크 위치 %d곳에서 측정할까요? 모든 스피커가 차례로 스윕을 재생합니다."
+
+msgctxt "#32102"
+msgid "The atmos67 service did not come back. Check its log."
+msgstr "atmos67 서비스가 다시 시작되지 않았습니다. 로그를 확인해 주세요."
+
+msgctxt "#32103"
+msgid "Preparing the measurement"
+msgstr "측정을 준비하는 중"
+
+msgctxt "#32104"
+msgid "Place the microphone at position %d of %d, at ear height, pointing up, and keep quiet."
+msgstr "마이크를 %d번째 위치(전체 %d곳)에 귀 높이로, 위를 향하게 두고 조용히 해 주세요."
+
+msgctxt "#32105"
+msgid "Measuring position %d"
+msgstr "%d번째 위치를 측정하는 중"
+
+msgctxt "#32106"
+msgid "Designing the correction (several minutes)"
+msgstr "보정을 설계하는 중 (몇 분 걸립니다)"
+
+msgctxt "#32107"
+msgid "The measured correction is now in use."
+msgstr "이제 측정 보정을 씁니다."
+
+msgctxt "#32108"
+msgid "Calibration failed:"
+msgstr "보정에 실패했습니다:"
+
+msgctxt "#32110"
+msgid "Speaker levels and distances"
+msgstr "스피커별 레벨·거리"
+
+msgctxt "#32111"
+msgid "%s   %+.1f dB   %s m"
+msgstr "%s   %+.1f dB   %s m"
+
+msgctxt "#32112"
+msgid "%s level trim (dB)"
+msgstr "%s 레벨 보정 (dB)"
+
+msgctxt "#32113"
+msgid "%s distance (m)"
+msgstr "%s 거리 (m)"
+
+msgctxt "#32114"
+msgid "Could not read the speakers of the current mode."
+msgstr "현재 모드의 스피커 목록을 읽지 못했습니다."

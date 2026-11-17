@@ -1,0 +1,91 @@
+"""Tests of the add-on's Kodi-free logic. Run: python3 -m unittest discover -s packaging/kodi/tests"""
+
+import os
+import socket
+import sys
+import tempfile
+import threading
+import unittest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "service.atmos67"))
+
+import common  # noqa: E402
+
+SETTINGS = {
+    "layout": "7.1.4", "layout_file_path": "", "interface": "eth0", "address": "239.69.67.1",
+    "ptp_domain": "0", "buffer_ms": "100", "mode": "1", "subs": "2", "slope": "24",
+    "xo_front": "80", "xo_center": "90", "xo_surround": "0", "xo_back": "80", "xo_top": "100",
+}
+LEVELS = {"L": {"trim": -1.5, "distance": 3.0}, "R": {"trim": 0.0, "distance": 3.343}, "SW1": {"trim": 2.0}}
+
+
+class ConfigTest(unittest.TestCase):
+    def test_manual_mode_carries_crossovers_trims_and_delays(self):
+        values = common.values(SETTINGS, LEVELS, "/p", -20.0)
+        self.assertEqual(values["MODE"], "manual")
+        self.assertEqual(values["CROSSOVER"], "front=80 center=90 back=80 top=100")
+        self.assertEqual(values["TRIMS"], "L=-1.5 SW1=2.0")
+        # R is 34.3 cm farther, so L waits 1 ms for it.
+        self.assertEqual(values["DELAYS"], "L=1.0")
+        self.assertEqual(values["AUTO_DESIGN"], "/p/designs/current")
+        text = common.config_text(values)
+        self.assertIn('MODE="manual"\n', text)
+        self.assertIn('VOLUME_DB="-20.0"\n', text)
+
+    def test_measured_correction_keeps_trims_but_not_distances(self):
+        values = common.values(dict(SETTINGS, mode="2"), LEVELS, "/p", 0)
+        self.assertEqual((values["MODE"], values["TRIMS"], values["DELAYS"]), ("auto", "L=-1.5 SW1=2.0", ""))
+
+    def test_measuring_runs_without_processing(self):
+        values = common.values(SETTINGS, LEVELS, "/p", 0, mode="measure")
+        self.assertEqual((values["CROSSOVER"], values["TRIMS"], values["DELAYS"]), ("", "", ""))
+        self.assertEqual(values["SUBS"], "2")
+
+    def test_quotes_survive_the_environment_file(self):
+        self.assertEqual(common.quote('a "b" \\c'), '"a \\"b\\" \\\\c"')
+
+
+class VolumeTest(unittest.TestCase):
+    def test_maps_kodi_percent_onto_60_db_below_the_maximum(self):
+        self.assertEqual(common.volume_db(100, False, -3.0), -3.0)
+        self.assertEqual(common.volume_db(50, False, 0.0), -30.0)
+        self.assertEqual(common.volume_db(0, False, 0.0), common.MUTED_DB)
+        self.assertEqual(common.volume_db(80, True, 0.0), common.MUTED_DB)
+
+
+class SocketTest(unittest.TestCase):
+    def test_sends_a_line_and_reads_the_answer(self):
+        path = os.path.join(tempfile.mkdtemp(), "control")
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(path)
+        server.listen(1)
+        received = []
+
+        def answer():
+            connection, _ = server.accept()
+            received.append(connection.recv(64))
+            connection.sendall(b"ok\n")
+            connection.close()
+
+        thread = threading.Thread(target=answer)
+        thread.start()
+        self.assertEqual(common.command("volume -12.5", path), "ok")
+        thread.join()
+        server.close()
+        self.assertEqual(received, [b"volume -12.5\n"])
+
+    def test_reads_calibration_progress(self):
+        self.assertEqual(common.progress('{"step": "measuring", "detail": "position 2"}\n'), ("measuring", "position 2"))
+        self.assertIsNone(common.progress("atmos67: something on stderr"))
+
+
+class LevelsTest(unittest.TestCase):
+    def test_round_trips(self):
+        profile = tempfile.mkdtemp()
+        self.assertEqual(common.read_levels(profile), {})
+        common.write_levels(profile, LEVELS)
+        self.assertEqual(common.read_levels(profile), LEVELS)
+
+
+if __name__ == "__main__":
+    unittest.main()

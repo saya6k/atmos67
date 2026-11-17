@@ -81,6 +81,158 @@
         </setting>
       </group>
     </category>
+    <category id="bass" label="32004">
+      <group id="1">
+        <setting id="mode" type="integer" label="32050" help="32051">
+          <level>0</level>
+          <default>0</default>
+          <constraints>
+            <options>
+              <option label="32052">0</option>
+              <option label="32053">1</option>
+              <option label="32054">2</option>
+            </options>
+          </constraints>
+          <control type="list" format="string">
+            <heading>32050</heading>
+          </control>
+        </setting>
+        <setting id="subs" type="integer" label="32055" help="32056">
+          <level>0</level>
+          <default>1</default>
+          <constraints>
+            <minimum>0</minimum>
+            <step>1</step>
+            <maximum>8</maximum>
+          </constraints>
+          <control type="slider" format="integer"><popup>false</popup></control>
+        </setting>
+        <setting id="slope" type="string" label="32057" help="32058">
+          <level>0</level>
+          <default>24</default>
+          <constraints>
+            <options>
+              <option>12</option>
+              <option>24</option>
+            </options>
+          </constraints>
+          <control type="list" format="string">
+            <heading>32057</heading>
+          </control>
+        </setting>
+        <setting id="xo_front" type="integer" label="32060" help="32065">
+          <level>0</level>
+          <default>80</default>
+          <constraints>
+            <minimum>0</minimum>
+            <step>10</step>
+            <maximum>250</maximum>
+          </constraints>
+          <control type="slider" format="integer"><popup>false</popup></control>
+        </setting>
+        <setting id="xo_center" type="integer" label="32061" help="32065">
+          <level>0</level>
+          <default>80</default>
+          <constraints>
+            <minimum>0</minimum>
+            <step>10</step>
+            <maximum>250</maximum>
+          </constraints>
+          <control type="slider" format="integer"><popup>false</popup></control>
+        </setting>
+        <setting id="xo_surround" type="integer" label="32062" help="32065">
+          <level>0</level>
+          <default>80</default>
+          <constraints>
+            <minimum>0</minimum>
+            <step>10</step>
+            <maximum>250</maximum>
+          </constraints>
+          <control type="slider" format="integer"><popup>false</popup></control>
+        </setting>
+        <setting id="xo_back" type="integer" label="32063" help="32065">
+          <level>0</level>
+          <default>80</default>
+          <constraints>
+            <minimum>0</minimum>
+            <step>10</step>
+            <maximum>250</maximum>
+          </constraints>
+          <control type="slider" format="integer"><popup>false</popup></control>
+        </setting>
+        <setting id="xo_top" type="integer" label="32064" help="32065">
+          <level>0</level>
+          <default>80</default>
+          <constraints>
+            <minimum>0</minimum>
+            <step>10</step>
+            <maximum>250</maximum>
+          </constraints>
+          <control type="slider" format="integer"><popup>false</popup></control>
+        </setting>
+        <setting id="levels" type="action" label="32066" help="32067">
+          <level>0</level>
+          <data>RunScript(special://home/addons/service.atmos67/levels.py)</data>
+          <control type="button" format="action">
+            <close>true</close>
+          </control>
+        </setting>
+      </group>
+    </category>
+    <category id="calibration" label="32005">
+      <group id="1">
+        <setting id="microphone" type="string" label="32070" help="32071">
+          <level>0</level>
+          <default>plughw:1,0</default>
+          <control type="edit" format="string">
+            <heading>32070</heading>
+          </control>
+        </setting>
+        <setting id="mic_cal" type="path" label="32072" help="32073">
+          <level>0</level>
+          <default/>
+          <constraints>
+            <writable>false</writable>
+            <masking>.txt|.cal|.frd</masking>
+            <allowempty>true</allowempty>
+          </constraints>
+          <control type="button" format="file">
+            <heading>32072</heading>
+          </control>
+        </setting>
+        <setting id="positions" type="integer" label="32074" help="32075">
+          <level>0</level>
+          <default>3</default>
+          <constraints>
+            <minimum>1</minimum>
+            <step>1</step>
+            <maximum>9</maximum>
+          </constraints>
+          <control type="slider" format="integer"><popup>false</popup></control>
+        </setting>
+        <setting id="calibrate" type="action" label="32076" help="32077">
+          <level>0</level>
+          <data>RunScript(special://home/addons/service.atmos67/calibrate.py)</data>
+          <control type="button" format="action">
+            <close>true</close>
+          </control>
+        </setting>
+      </group>
+    </category>
+    <category id="volume" label="32006">
+      <group id="1">
+        <setting id="max_volume_db" type="integer" label="32080" help="32081">
+          <level>0</level>
+          <default>0</default>
+          <constraints>
+            <minimum>-30</minimum>
+            <step>1</step>
+            <maximum>12</maximum>
+          </constraints>
+          <control type="slider" format="integer"><popup>false</popup></control>
+        </setting>
+      </group>
+    </category>
     <category id="kodi" label="32003">
       <group id="1">
         <setting id="use_as_output" type="action" label="32030" help="32031">
