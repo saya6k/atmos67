@@ -2,7 +2,8 @@
 
 Restarts the service to measure (its speakers and subwoofers, without
 correction), runs `atmos67 calibrate` for each microphone position the user
-places, and switches to the new correction when SECS 2R has designed it. On
+places, measures how late the sound reaches the main seat for the picture
+sync, and switches to the new correction when SECS 2R has designed it. On
 cancel or failure the previous settings come back.
 """
 
@@ -38,23 +39,26 @@ def wait_for_sender(seconds=30):
 
 
 def run(dialog, args, heading):
-    """Runs one calibration step, showing its progress; False when cancelled or failed."""
+    """Runs one calibration step, showing its progress. Returns the detail of
+    its last progress line, or None when cancelled or failed."""
     process = subprocess.Popen([ATMOS67, "calibrate"] + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     dialog.update(0, heading)
+    detail = ""
     for line in process.stdout:
         event = common.progress(line)
         if event:
+            detail = event[1]
             dialog.update(0, heading + "\n" + " ".join(part for part in event if part))
         if dialog.iscanceled():
             process.kill()
             process.wait()
-            return False
+            return None
     error = process.stderr.read()
     if process.wait() != 0:
         xbmc.log(f"{service.ADDON_ID}: calibrate {args[0]}: {error}", xbmc.LOGERROR)
         xbmcgui.Dialog().ok(text(32100), text(32108) + "\n" + error.strip()[-400:])
-        return False
-    return True
+        return None
+    return detail
 
 
 def calibrate():
@@ -81,19 +85,26 @@ def calibrate():
     dialog = xbmcgui.DialogProgress()
     dialog.create(text(32100))
     try:
-        if not run(dialog, start, text(32103)):
+        if run(dialog, start, text(32103)) is None:
             return
         for position in range(1, positions + 1):
             dialog.update(0, text(32104, position, positions))
             if not xbmcgui.Dialog().yesno(text(32100), text(32104, position, positions)):
                 return
-            if not run(dialog, ["measure", "--position", str(position)] + common_args, text(32105, position)):
+            if run(dialog, ["measure", "--position", str(position)] + common_args, text(32105, position)) is None:
                 return
         designs = os.path.join(profile, "designs")
         generation = os.path.join(designs, time.strftime("%Y%m%d-%H%M%S"))
         os.makedirs(designs, exist_ok=True)
-        if not run(dialog, ["finish", "--out", generation] + common_args, text(32106)):
+        if run(dialog, ["finish", "--out", generation] + common_args, text(32106)) is None:
             return
+        # From the main seat, where the first position was: the time from the
+        # sender to the ear, which the picture sync adds as the receivers' part.
+        dialog.update(0, text(32109))
+        if xbmcgui.Dialog().yesno(text(32100), text(32109)):
+            latency = run(dialog, ["latency", "--control", common.CONTROL, "--mic", microphone], text(32109))
+            if latency:
+                addon.setSetting("receiver_latency_ms", str(round(float(latency))))
         # The service reads the design through this link; switch it in one step.
         link = common.auto_design(profile)
         os.symlink(os.path.basename(generation), link + ".new")

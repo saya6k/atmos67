@@ -7,6 +7,7 @@ mod calibrate;
 mod decode;
 mod dsp;
 mod iec61937;
+mod latency;
 mod layout;
 mod mat;
 mod measure;
@@ -39,7 +40,8 @@ const USAGE: &str = "usage: atmos67 (--layout PRESET | --layout-file LAYOUT.json
        atmos67 (--layout PRESET | --layout-file LAYOUT.json) --dsp DIR --dsp-only < speakers.f32le > corrected.f32le
        atmos67 calibrate start (--layout PRESET | --layout-file LAYOUT.json) --subs N --project DIR --control SOCKET --mic ALSA_DEVICE [--mic-cal FILE]
        atmos67 calibrate measure --project DIR --control SOCKET --mic ALSA_DEVICE --position N
-       atmos67 calibrate finish --project DIR --control SOCKET --mic ALSA_DEVICE --out DIR";
+       atmos67 calibrate finish --project DIR --control SOCKET --mic ALSA_DEVICE --out DIR
+       atmos67 calibrate latency --control SOCKET --mic ALSA_DEVICE [--channel N]";
 
 const OUTPUT_RATE: u64 = 48_000;
 
@@ -311,6 +313,7 @@ fn calibration(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn Err
         capture_command: None,
     };
     let (mut speakers, mut subs, mut position, mut out, mut mic_cal) = (None, 0usize, 1i64, None, None);
+    let mut channel = 1usize;
     while let Some(flag) = args.next() {
         let mut value = || args.next().ok_or(USAGE);
         match flag.as_str() {
@@ -322,6 +325,7 @@ fn calibration(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn Err
             "--mic" => options.microphone = value()?,
             "--mic-cal" => mic_cal = Some(std::path::PathBuf::from(value()?)),
             "--position" => position = value()?.parse()?,
+            "--channel" => channel = value()?.parse()?,
             "--out" => out = Some(std::path::PathBuf::from(value()?)),
             // For tests: a command printing the microphone as FLOAT32LE.
             "--capture-command" => {
@@ -330,7 +334,23 @@ fn calibration(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn Err
             _ => return Err(USAGE.into()),
         }
     }
-    if options.project.as_os_str().is_empty() || options.control.as_os_str().is_empty() || options.microphone.is_empty() {
+    if options.control.as_os_str().is_empty() || options.microphone.is_empty() {
+        return Err(USAGE.into());
+    }
+    if step == "latency" {
+        // Short periods, so the microphone's reads date its samples closely.
+        let capture = options.capture_command.clone().unwrap_or_else(|| {
+            ["arecord", "-q", "-D", &options.microphone, "-t", "raw", "-f", "FLOAT_LE", "-r", "48000", "-c", "1"]
+                .iter()
+                .chain(&["--period-time=5000", "--buffer-time=40000"])
+                .map(|s| s.to_string())
+                .collect()
+        });
+        let ms = latency::measure(&options.control, &capture, channel.checked_sub(1).ok_or(USAGE)?)?;
+        println!("{}", serde_json::json!({ "step": "latency", "detail": format!("{ms:.1}") }));
+        return Ok(());
+    }
+    if options.project.as_os_str().is_empty() {
         return Err(USAGE.into());
     }
     match step.as_str() {

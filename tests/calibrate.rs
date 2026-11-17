@@ -5,7 +5,11 @@
 //! microphone lags the sender by no more than a real one would. The correction SECS 2R
 //! designs from it must undo those delays and levels.
 //!
+//! Then `calibrate latency` must find the delay of L in the room.
+//!
 //! Ignored by default: it measures in real time and designs for minutes.
+//! Run it natively; under qemu the simulated room falls behind real time,
+//! the microphone lags and the measurement goes wrong.
 
 use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
@@ -39,24 +43,31 @@ fn atmos67(args: &[&str]) {
 /// `O_NONBLOCK` on Linux, which the test does not take libc for.
 const O_NONBLOCK: i32 = 0o4000;
 
-/// Writes `bytes` to the FIFO while something reads it, and drops them
-/// otherwise, as a microphone nobody records is lost. Pieces of at most
-/// PIPE_BUF bytes are written whole or not at all, so samples stay aligned.
-fn feed(fifo: &mut Option<File>, path: &Path, bytes: &[u8]) {
+/// Writes `bytes` to the FIFO while something reads it, keeping in
+/// `backlog` what the pipe cannot take yet, so the microphone has no gaps;
+/// with no reader they are dropped, as a microphone nobody records is lost.
+/// Pieces of at most PIPE_BUF bytes are written whole or not at all, so
+/// samples stay aligned.
+fn feed(fifo: &mut Option<File>, backlog: &mut Vec<u8>, path: &Path, bytes: &[u8]) {
     if fifo.is_none() {
+        backlog.clear();
         *fifo = OpenOptions::new().write(true).custom_flags(O_NONBLOCK).open(path).ok();
     }
     let Some(file) = fifo else { return };
-    for piece in bytes.chunks(4096) {
+    backlog.extend_from_slice(bytes);
+    let mut written = 0;
+    for piece in backlog.chunks(4096) {
         match file.write(piece) {
-            Ok(_) => {}
-            Err(e) if e.kind() == ErrorKind::WouldBlock => {}
+            Ok(_) => written += piece.len(),
+            Err(e) if e.kind() == ErrorKind::WouldBlock => break,
             Err(_) => {
                 *fifo = None;
+                backlog.clear();
                 return;
             }
         }
     }
+    backlog.drain(..written);
 }
 
 /// Hears the sender's two streams (8 and 5 channels) and feeds the room's
@@ -67,7 +78,7 @@ fn simulate(first: Ipv4Addr, mic: &Path, stop: &AtomicBool) {
         rtp.join_multicast_v4(&Ipv4Addr::from(u32::from(first) + index), &Ipv4Addr::UNSPECIFIED).unwrap();
     }
     rtp.set_read_timeout(Some(Duration::from_millis(200))).unwrap();
-    let mut fifo = None;
+    let (mut fifo, mut backlog) = (None, Vec::new());
     // Microphone samples from `base` on, still being added to.
     let (mut base, mut latest) = (None::<u64>, 0u64);
     let mut pending: VecDeque<f32> = VecDeque::new();
@@ -99,7 +110,7 @@ fn simulate(first: Ipv4Addr, mic: &Path, stop: &AtomicBool) {
         // a timestamp arrive together, and delays only push sound later.
         let ready = (latest.saturating_sub(start).saturating_sub(48) as usize).min(pending.len());
         let bytes: Vec<u8> = pending.drain(..ready).flat_map(f32::to_le_bytes).collect();
-        feed(&mut fifo, mic, &bytes);
+        feed(&mut fifo, &mut backlog, mic, &bytes);
         base = Some(start + ready as u64);
     }
 }
@@ -139,6 +150,19 @@ fn calibrates_a_simulated_room() {
     ];
     atmos67(&[&["calibrate", "start", "--layout", "7.1.4", "--subs", "2"][..], &common].concat());
     atmos67(&[&["calibrate", "measure", "--position", "1"][..], &common].concat());
+
+    // The room delays L by 96 samples (2 ms); the simulation hands the
+    // microphone on a packet or so later than a real one would.
+    let output = Command::new(BIN)
+        .args(["calibrate", "latency", "--control", socket.to_str().unwrap(), "--mic", "simulated"])
+        .args(["--capture-command", &capture, "--channel", "1"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let line = String::from_utf8_lossy(&output.stdout).into_owned();
+    let ms: f64 = line.split('"').nth(7).and_then(|v| v.parse().ok()).unwrap_or_else(|| panic!("{line}"));
+    eprintln!("latency {ms} ms");
+    assert!((1.5..8.0).contains(&ms), "latency {ms} ms");
     stop.store(true, Ordering::Relaxed);
     drop(sender.stdin.take());
     sender.wait().unwrap();

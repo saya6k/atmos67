@@ -293,3 +293,7 @@ msgstr "미세 조정 (ms)"
 msgctxt "#32095"
 msgid "Added to the computed delay. Raise it when the sound still comes late."
 msgstr "계산한 지연에 더합니다. 소리가 아직 늦으면 올립니다."
+
+msgctxt "#32109"
+msgid "Put the microphone back at the main seat to measure how late the sound arrives, for the picture sync."
+msgstr "영상 동기를 위해 소리가 늦는 정도를 잽니다. 마이크를 주 청취 위치로 다시 옮겨 주세요."

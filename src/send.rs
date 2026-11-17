@@ -21,7 +21,8 @@
 //! the program, and `ok <sample>` answers once the last of them has left,
 //! with the PTP time (in samples) the first one was sent at.
 //!
-//! `latency` answers `ok <ms>`: how long the sender holds the program back,
+//! `channels` answers `ok <count>` of the channels sent, and `latency`
+//! answers `ok <ms>`: how long the sender holds the program back,
 //! its playout buffer and the correction's block and filters together.
 
 use std::collections::VecDeque;
@@ -372,6 +373,7 @@ fn control(
             let reply = match line.split_whitespace().collect::<Vec<_>>()[..] {
                 ["play", count, frames] => play(&mut reader, count, frames, channels, measurement),
                 ["latency"] => Ok(format!("{latency_ms:.1}")),
+                ["channels"] => Ok(channels.to_string()),
                 ["volume", db] => match db.parse::<f64>() {
                     Ok(db) if db.is_finite() => {
                         volume.db = db;
