@@ -6,6 +6,7 @@ After=atmos67-ptp4l.service sound.target network-online.target
 [Service]
 EnvironmentFile=/etc/atmos67/atmos67.conf
 EnvironmentFile=-/home/osmc/.kodi/userdata/addon_data/service.atmos67/atmos67.conf
+RuntimeDirectory=atmos67
 ExecStart=/usr/lib/atmos67/atmos67-run
 Restart=always
 RestartSec=2

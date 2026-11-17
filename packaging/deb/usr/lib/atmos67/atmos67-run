@@ -3,6 +3,9 @@
 # speakers as AES67 streams. The sender runs for as long as the service does;
 # the capture and the decoder restart whenever Kodi reopens the loopback,
 # because the capture has to be opened in the format Kodi chose.
+#
+# The sender applies the correction MODE selects (off, manual, auto, or measure
+# for the calibration wizard) and takes the volume on its control socket.
 set -u
 
 if [ -n "${LAYOUT_FILE:-}" ]; then
@@ -17,6 +20,46 @@ grandmaster() {
     pmc -u -b 0 -d "$PTP_DOMAIN" 'GET PARENT_DATA_SET' 2>/dev/null \
         | sed -n 's/.*grandmasterIdentity *//p' | tr -d . | tr a-f A-F | sed 's/../&-/g; s/-$//'
 }
+
+# The correction the sender runs, written for this layout at every start.
+run=/run/atmos67
+mkdir -p "$run"
+rm -f "$run/control"
+mode=${MODE:-off}
+if [ "$mode" = auto ] && [ ! -e "${AUTO_DESIGN:-}/secs-design.json" ]; then
+    echo "atmos67: no measured correction at ${AUTO_DESIGN:-}; sending without correction" >&2
+    mode=off
+fi
+# Each value is NAME=NUMBER with no spaces, so the words split as they should.
+extra=""
+for trim in ${TRIMS:-}; do extra="$extra --trim $trim"; done
+case "$mode" in
+    measure) extra="--subs ${SUBS:-0}" ;;
+    manual)
+        extra="$extra --subs ${SUBS:-0} --slope ${SLOPE:-24}"
+        for crossover in ${CROSSOVER:-}; do extra="$extra --crossover $crossover"; done
+        for delay in ${DELAYS:-}; do extra="$extra --delay $delay"; done
+        ;;
+    auto) extra="$extra --base $AUTO_DESIGN" ;;
+esac
+dsp=""
+if [ "$mode" != off ]; then
+    rm -rf "$run/design"
+    # shellcheck disable=SC2086
+    if atmos67 "$@" --write-design "$run/design" $extra; then
+        dsp="--dsp $run/design"
+    else
+        echo "atmos67: could not write the $mode correction; sending without correction" >&2
+    fi
+fi
+
+# The Kodi add-on, running as osmc, sets the volume and calibrates through
+# the sender's socket.
+(
+    until [ -S "$run/control" ]; do sleep 0.2; done
+    chgrp osmc "$run/control" 2>/dev/null
+    chmod 660 "$run/control"
+) &
 
 gmid=$(grandmaster)
 until [ -n "$gmid" ]; do
@@ -59,5 +102,7 @@ while :; do
     # Stopping the capture ends the decoder with its input.
     kill "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null
     wait $!
+# shellcheck disable=SC2086
 done | atmos67 "$@" --aes67-send --aes67-address "$ADDRESS" --aes67-buffer-ms "$BUFFER_MS" \
-    --ptp-gmid "$gmid" --ptp-domain "$PTP_DOMAIN"
+    --ptp-gmid "$gmid" --ptp-domain "$PTP_DOMAIN" \
+    --control "$run/control" --volume "${VOLUME_DB:-0}" $dsp
