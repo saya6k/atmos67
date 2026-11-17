@@ -3,13 +3,12 @@
 //! layout, writing interleaved FLOAT32LE PCM on stdout.
 
 mod aes67;
+mod calibrate;
 mod decode;
 mod dsp;
 mod iec61937;
 mod layout;
 mod mat;
-// Used by the calibration command (tasks/dsp.md D8).
-#[allow(dead_code)]
 mod measure;
 mod render;
 mod send;
@@ -37,7 +36,10 @@ const USAGE: &str = "usage: atmos67 (--layout PRESET | --layout-file LAYOUT.json
        atmos67 (--layout PRESET | --layout-file LAYOUT.json) --write-design DIR [--base SECS_EXPORT_DIR]
            [--subs N] [--crossover front|center|surround|back|top=HZ]... [--slope 12|24]
            [--trim ROLE=DB]... [--delay ROLE=MS]...
-       atmos67 (--layout PRESET | --layout-file LAYOUT.json) --dsp DIR --dsp-only < speakers.f32le > corrected.f32le";
+       atmos67 (--layout PRESET | --layout-file LAYOUT.json) --dsp DIR --dsp-only < speakers.f32le > corrected.f32le
+       atmos67 calibrate start (--layout PRESET | --layout-file LAYOUT.json) --subs N --project DIR --control SOCKET --mic ALSA_DEVICE [--mic-cal FILE]
+       atmos67 calibrate measure --project DIR --control SOCKET --mic ALSA_DEVICE --position N
+       atmos67 calibrate finish --project DIR --control SOCKET --mic ALSA_DEVICE --out DIR";
 
 const OUTPUT_RATE: u64 = 48_000;
 
@@ -51,6 +53,9 @@ const MAX_LAG_FRAMES: u64 = 2 * 1536;
 const GAP_FRAMES: u64 = 1536 * 3 / 2;
 
 fn main() -> Result<(), Box<dyn Error>> {
+    if std::env::args().nth(1).as_deref() == Some("calibrate") {
+        return calibration(std::env::args().skip(2));
+    }
     let mut speakers = None;
     let mut input_channels = 2usize;
     // HDMI carries compressed audio at four times the 48 kHz audio rate.
@@ -293,5 +298,49 @@ impl<W: Write> Output<W> {
             self.frames += frames;
         }
         Ok(())
+    }
+}
+
+/// `atmos67 calibrate STEP …`; see `calibrate`.
+fn calibration(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn Error>> {
+    let step = args.next().ok_or(USAGE)?;
+    let mut options = calibrate::Options {
+        project: Default::default(),
+        control: Default::default(),
+        microphone: String::new(),
+        capture_command: None,
+    };
+    let (mut speakers, mut subs, mut position, mut out, mut mic_cal) = (None, 0usize, 1i64, None, None);
+    while let Some(flag) = args.next() {
+        let mut value = || args.next().ok_or(USAGE);
+        match flag.as_str() {
+            "--layout" => speakers = Some(SpeakerLayout::preset(&value()?)?),
+            "--layout-file" => speakers = Some(SpeakerLayout::from_json_file(value()?)?),
+            "--subs" => subs = value()?.parse()?,
+            "--project" => options.project = value()?.into(),
+            "--control" => options.control = value()?.into(),
+            "--mic" => options.microphone = value()?,
+            "--mic-cal" => mic_cal = Some(std::path::PathBuf::from(value()?)),
+            "--position" => position = value()?.parse()?,
+            "--out" => out = Some(std::path::PathBuf::from(value()?)),
+            // For tests: a command printing the microphone as FLOAT32LE.
+            "--capture-command" => {
+                options.capture_command = Some(value()?.split_whitespace().map(String::from).collect());
+            }
+            _ => return Err(USAGE.into()),
+        }
+    }
+    if options.project.as_os_str().is_empty() || options.control.as_os_str().is_empty() || options.microphone.is_empty() {
+        return Err(USAGE.into());
+    }
+    match step.as_str() {
+        "start" => {
+            let labels = speakers.ok_or(USAGE)?.channel_labels().to_vec();
+            let (_, outputs) = dsp::manual::topology(&labels, subs)?;
+            calibrate::start(&options, &outputs, mic_cal.as_deref())
+        }
+        "measure" => calibrate::measure(&options, position),
+        "finish" => calibrate::finish(&options, &out.ok_or(USAGE)?),
+        _ => Err(USAGE.into()),
     }
 }

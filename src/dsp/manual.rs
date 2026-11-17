@@ -181,11 +181,20 @@ fn copy_base(base: &Path, folder: &Path) -> Result<(serde_json::Value, Vec<Strin
     Ok((manifest, text.lines().map(String::from).collect()))
 }
 
-fn scratch(labels: &[String], settings: &Settings) -> Result<(serde_json::Value, Vec<String>)> {
+/// The SECS 2R roles of the rendered speakers `labels`, and the outputs a
+/// design for them with `subs` subwoofers sends: the mains, then SW1…SWn.
+pub fn topology(labels: &[String], subs: usize) -> Result<(Vec<String>, Vec<String>)> {
     let inputs: Vec<String> = labels
         .iter()
         .map(|label| role(label).map(String::from).ok_or_else(|| format!("speaker {label} has no SECS 2R role")))
         .collect::<std::result::Result<_, String>>()?;
+    let mut outputs: Vec<String> = inputs.iter().filter(|r| *r != "LFE").cloned().collect();
+    outputs.extend((1..=subs).map(|n| format!("SW{n}")));
+    Ok((inputs, outputs))
+}
+
+fn scratch(labels: &[String], settings: &Settings) -> Result<(serde_json::Value, Vec<String>)> {
+    let (inputs, outputs) = topology(labels, settings.subs)?;
     let mains: Vec<usize> = (0..inputs.len()).filter(|&i| inputs[i] != "LFE").collect();
     let lfe = inputs.iter().position(|r| r == "LFE");
     let subs = settings.subs;
@@ -231,8 +240,6 @@ fn scratch(labels: &[String], settings: &Settings) -> Result<(serde_json::Value,
     sum.extend((0..subs).map(|_| bus.clone()));
     steps.push(r#"  - {"type": "Mixer", "name": "sum"}"#.to_string());
 
-    let mut outputs: Vec<String> = mains.iter().map(|&i| inputs[i].clone()).collect();
-    outputs.extend((1..=subs).map(|n| format!("SW{n}")));
     let mut lines = vec![
         "# atmos67 manual design: bass management, trims and delays".to_string(),
         "devices:".into(),
