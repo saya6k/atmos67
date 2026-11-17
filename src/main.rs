@@ -8,6 +8,7 @@ mod iec61937;
 mod layout;
 mod mat;
 mod render;
+mod send;
 
 use std::error::Error;
 use std::io::{self, Read, Write};
@@ -26,7 +27,8 @@ use openjoc_api::OpenJocConfig;
 use openjoc_scene::SpeakerLayout;
 
 const USAGE: &str = "usage: atmos67 (--layout PRESET | --layout-file LAYOUT.json) [--input-channels 2|8] [--input-rate HZ] < capture.s16le > speakers.f32le
-       atmos67 (--layout PRESET | --layout-file LAYOUT.json) --aes67-sources > status.json";
+       atmos67 (--layout PRESET | --layout-file LAYOUT.json) --aes67-sources > status.json
+       atmos67 (--layout PRESET | --layout-file LAYOUT.json) --aes67-send --ptp-gmid ID [--ptp-domain N] [--aes67-address A.B.C.D] [--aes67-buffer-ms MS] < speakers.f32le";
 
 const OUTPUT_RATE: u64 = 48_000;
 
@@ -45,6 +47,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     // HDMI carries compressed audio at four times the 48 kHz audio rate.
     let mut input_rate = 192_000u32;
     let mut print_sources = false;
+    let mut send = false;
+    let mut send_config = send::Config {
+        address: std::net::Ipv4Addr::new(239, 69, 67, 1),
+        gmid: String::new(),
+        domain: 0,
+        buffer_ms: 100,
+    };
     let mut args = std::env::args().skip(1);
     while let Some(flag) = args.next() {
         let mut value = || args.next().ok_or(USAGE);
@@ -54,11 +63,16 @@ fn main() -> Result<(), Box<dyn Error>> {
             "--input-channels" => input_channels = value()?.parse()?,
             "--input-rate" => input_rate = value()?.parse()?,
             "--aes67-sources" => print_sources = true,
+            "--aes67-send" => send = true,
+            "--aes67-address" => send_config.address = value()?.parse()?,
+            "--aes67-buffer-ms" => send_config.buffer_ms = value()?.parse()?,
+            "--ptp-gmid" => send_config.gmid = value()?,
+            "--ptp-domain" => send_config.domain = value()?.parse()?,
             _ => return Err(USAGE.into()),
         }
     }
     let speakers = speakers.ok_or(USAGE)?;
-    if !matches!(input_channels, 2 | 8) || input_rate == 0 {
+    if !matches!(input_channels, 2 | 8) || input_rate == 0 || send && send_config.gmid.is_empty() {
         return Err(USAGE.into());
     }
     let layout = Layout::from_openjoc(&speakers)?;
@@ -78,6 +92,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     if print_sources {
         print!("{}", aes67::status_json(info.channel_count));
         return Ok(());
+    }
+    if send {
+        return send::run(info.channel_count, &send_config);
     }
     eprintln!(
         "atmos67: output {} channels [{}], FLOAT32LE",

@@ -49,6 +49,8 @@ cargo test --release -- --ignored    # samples/ 의 실제 파일로 하는 시�
 
 ## 실행
 
+HDMI 입력이 있는 보드에서 aes67-linux-daemon과 함께 쓰는 방법입니다. Kodi가 설치된 OSMC(Vero V)에서는 아래 "OSMC (Vero V) 패키지"를 봅니다.
+
 ### 1. AES67 스트림 구성
 
 [aes67-linux-daemon](https://github.com/bondagit/aes67-linux-daemon)을 설치한 뒤, 배치에 맞는 스트림 구성을 만들어 데몬의 `status_file`로 씁니다. 8채널씩 48 kHz L24 스트림으로 나뉩니다.
@@ -119,6 +121,71 @@ arecord -D hw:HDMIIN -f S16_LE -c 8 -r 192000 -t raw \
 ```
 
 설정 파일은 `export/` 아래에 디자인 이름으로 만들어집니다. SECS 2R의 프리셋·채널 배정이 `atmos67`의 출력 채널 순서와 맞는지 확인해야 합니다.
+
+## OSMC (Vero V) 패키지
+
+Kodi가 재생하는 영상의 오디오를 같은 장비에서 디코딩해 AES67로 보내는 구성입니다. Vero V에는 HDMI 입력이 없으므로 Kodi가 비트스트림을 ALSA 루프백 장치로 패스스루하고, `atmos67`이 그것을 캡처합니다.
+
+```
+Kodi ─> ALSA 루프백 ─> arecord ─> atmos67 ─> atmos67 --aes67-send ─> AES67 (RTP)
+(패스스루) (snd-aloop)            (디코딩)    (송출)                    ptp4l (PTP)
+```
+
+Vero V의 커널은 서명된 모듈만 받기 때문에(`CONFIG_MODULE_SIG_FORCE`) aes67-linux-daemon의 RAVENNA 커널 모듈을 올릴 수 없습니다. 그래서 송출은 `atmos67 --aes67-send`가 직접 합니다. 8채널씩 48 kHz L24, 1 ms 패킷의 멀티캐스트 RTP 스트림을 보내고 SAP로 알리며, 재생하지 않는 동안에는 무음을 보냅니다. RTP 타임스탬프는 시스템 클록에서 읽은 PTP 시간이고, 시스템 클록은 linuxptp(`ptp4l`, 하드웨어 타임스탬프가 있으면 `phc2sys`도)가 PTP에 맞춥니다.
+
+### 빌드
+
+Docker가 있는 Linux(arm64 또는 amd64)에서 OSMC의 userland(Debian bullseye, armhf)용으로 교차 빌드합니다. FFmpeg는 필요한 디코더(AC-3, E-AC-3, DTS)만 넣어 정적으로 링크합니다.
+
+```sh
+docker build -t atmos67-armhf packaging
+docker run --rm -v "$PWD":/work atmos67-armhf packaging/build.sh
+```
+
+시험이 armhf 바이너리를 실행하므로 커널에 32비트 ARM용 qemu가 등록돼 있어야 합니다(Docker Desktop은 돼 있고, 아니면 `docker run --privileged --rm tonistiigi/binfmt --install arm`).
+
+`target/packages/`에 `atmos67_<버전>_armhf.deb`와 `service.atmos67-<버전>.zip`이 생깁니다.
+
+### 설치
+
+```sh
+sudo apt install ./atmos67_0.1.0_armhf.deb     # Vero V에서. alsa-utils, linuxptp, ethtool을 함께 설치합니다.
+```
+
+패키지는 `snd-aloop` 모듈을 올리고 서비스 세 개를 켭니다: `atmos67`(캡처·디코딩·송출), `atmos67-ptp4l`, `atmos67-phc2sys`. 그 다음 Kodi에서:
+
+1. 설정 → 애드온 → zip 파일에서 설치로 `service.atmos67-0.1.0.zip`을 설치합니다.
+2. 애드온 설정에서 스피커 배치(프리셋 또는 배치 파일), 네트워크 인터페이스, 멀티캐스트 주소, PTP 도메인을 고릅니다. 바꾸면 서비스가 다시 시작됩니다.
+3. 애드온 설정의 "Kodi 오디오 출력을 atmos67로 설정"을 실행합니다. 오디오 출력과 패스스루 장치를 `atmos67 (AES67)`로 바꾸고, 스피커 수를 2.0으로, 모든 포맷의 패스스루와 Dolby Digital 트랜스코딩을 켭니다. Kodi를 다시 시작해야 장치가 목록에 나타날 수 있습니다.
+
+애드온 없이 쓰려면 `/etc/atmos67/atmos67.conf`를 고치고 `sudo systemctl restart atmos67`을 합니다.
+
+### 알아 둘 것
+
+- **PCM은 무음입니다.** Kodi가 패스스루하지 않고 직접 디코딩한 소리(스테레오 음악, 메뉴 효과음)는 나지 않습니다. 멀티채널은 위 설정에서 Kodi가 Dolby Digital로 트랜스코딩해 보내므로 납니다.
+- **PTP와 시스템 시각.** 기본 설정은 네트워크에서 가장 좋은 클록이 그랜드마스터가 됩니다. 다른 장비가 그랜드마스터가 되면 Vero V의 시스템 시각이 그 장비를 따라가므로, 그 장비가 실제 시각을 주지 않으면(Dante 장비 등) 시스템 시각이 틀어지고 NTP와도 충돌합니다. Vero V의 시각을 지키려면 `/etc/atmos67/ptp4l.conf`의 `priority1`을 낮춰 Vero V를 그랜드마스터로 만듭니다.
+- **영상과의 동기.** Kodi는 루프백 뒤의 지연(디코딩, 버퍼 기본 100 ms, 수신기)을 모릅니다. Kodi의 오디오 오프셋으로 맞춥니다.
+- **룸 보정.** 이 패키지는 CamillaDSP를 포함하지 않습니다.
+- **라이선스.** 바이너리에 FFmpeg(LGPL)가 정적으로 들어 있습니다. 배포한다면 그 조건을 따라야 합니다.
+
+### 확인한 것과 확인하지 못한 것
+
+Vero V 실기 없이 만들었습니다.
+
+확인한 것 (arm64 Linux 컨테이너에서, armhf 바이너리는 qemu로 실행):
+
+- 기존 시험 전부와 송출 시험이 armhf 바이너리로 통과합니다. 송출 시험은 12채널 입력이 두 멀티캐스트 스트림으로 나가 입력과 샘플 단위로 같고, 타임스탬프가 시스템 클록의 PTP 시간이며, SAP 안내가 나오는지 봅니다.
+- 바이너리는 glibc 2.30 이하의 심볼만 쓰고(bullseye는 2.31) libc 계열 외의 공유 라이브러리가 필요 없습니다.
+- `.deb`가 bullseye에 설치되고, ALSA가 `hdmi_atmos67` 정의를 Kodi가 붙이는 인자와 함께 읽고, `ptp4l`이 설정으로 뜨고, 서비스 스크립트가 `ptp4l`에서 그랜드마스터를 읽어 초당 1000패킷의 스트림과 SDP를 내보냅니다.
+- OSMC 저장소의 Vero V 커널 패키지(4.9.269-93)에 `snd-aloop` 모듈이 들어 있습니다.
+
+확인하지 못한 것:
+
+- Kodi가 `atmos67 (AES67)` 장치를 목록에 보여 주고 TrueHD·DTS-HD까지 패스스루하는지. OSMC의 Kodi는 Amlogic용으로 고친 빌드입니다.
+- 루프백 캡처부터 디코더까지의 경로(시험 환경에 `snd-aloop`이 없습니다)와 Kodi가 포맷을 바꿀 때의 재시작.
+- 실제 AES67 수신기와의 호환, Vero V 이더넷의 PTP 정확도, 하드웨어 타임스탬프 유무.
+- **성능.** Vero V의 Cortex-A55는 아래 "성능"의 M1보다 몇 배 느리고 32비트로 돕니다. M1에서 실시간의 3배 남짓이던 TrueHD Atmos와 E-AC-3 JOC는 실시간을 따라가지 못할 수 있습니다.
+- 애드온은 XML과 Python 문법만 검사했고 Kodi에서 실행해 보지 않았습니다.
 
 ## 동작
 

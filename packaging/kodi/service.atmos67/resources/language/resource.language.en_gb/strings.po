@@ -1,0 +1,91 @@
+# Kodi Media Center language file
+# Addon Name: atmos67
+# Addon id: service.atmos67
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: en_GB\n"
+
+msgctxt "#32001"
+msgid "Speakers"
+msgstr ""
+
+msgctxt "#32002"
+msgid "AES67 network"
+msgstr ""
+
+msgctxt "#32003"
+msgid "Kodi"
+msgstr ""
+
+msgctxt "#32010"
+msgid "Speaker layout"
+msgstr ""
+
+msgctxt "#32011"
+msgid "Preset used when no layout file is set."
+msgstr ""
+
+msgctxt "#32012"
+msgid "Layout file"
+msgstr ""
+
+msgctxt "#32013"
+msgid "Your own speaker positions as an OpenJOC JSON file. Replaces the preset. Azimuth is positive to the left."
+msgstr ""
+
+msgctxt "#32020"
+msgid "Network interface"
+msgstr ""
+
+msgctxt "#32021"
+msgid "Interface the PTP clock runs on."
+msgstr ""
+
+msgctxt "#32022"
+msgid "Multicast address of the first stream"
+msgstr ""
+
+msgctxt "#32023"
+msgid "Speakers are sent 8 to a stream; further streams use the following addresses."
+msgstr ""
+
+msgctxt "#32024"
+msgid "PTP domain"
+msgstr ""
+
+msgctxt "#32025"
+msgid "Must match the PTP domain of the AES67 receivers."
+msgstr ""
+
+msgctxt "#32026"
+msgid "Buffer (ms)"
+msgstr ""
+
+msgctxt "#32027"
+msgid "Audio held back before sending. Raise it if the sound drops out; compensate with Kodi's audio offset."
+msgstr ""
+
+msgctxt "#32030"
+msgid "Use atmos67 as Kodi's audio output"
+msgstr ""
+
+msgctxt "#32031"
+msgid "Selects the atmos67 device for audio and passthrough and enables passthrough of every format. Sound no longer goes to HDMI."
+msgstr ""
+
+msgctxt "#32040"
+msgid "The atmos67 package is not installed"
+msgstr ""
+
+msgctxt "#32041"
+msgid "Could not restart the atmos67 service"
+msgstr ""
+
+msgctxt "#32042"
+msgid "Kodi now plays through atmos67."
+msgstr ""
+
+msgctxt "#32043"
+msgid "These Kodi settings could not be changed:"
+msgstr ""

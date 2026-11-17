@@ -1,0 +1,328 @@
+//! AES67 sender for systems that cannot load the RAVENNA ALSA driver. Reads
+//! interleaved FLOAT32LE speaker PCM at 48 kHz on stdin and sends it as L24
+//! RTP streams of up to 8 channels in 1 ms packets, each announced by SAP.
+//!
+//! RTP timestamps count samples of PTP time (`a=mediaclk:direct=0`). PTP time
+//! is taken from the system clock, so the system clock has to be the one PTP
+//! synchronises: either disciplined by the grandmaster (`ptp4l -S`, `phc2sys`)
+//! or itself the grandmaster's time source.
+//!
+//! The streams never stop: while stdin has nothing to play they carry
+//! silence, so receivers stay locked between titles.
+
+use std::collections::VecDeque;
+use std::error::Error;
+use std::io::{self, Read};
+use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+use std::ops::Range;
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use crate::aes67::CHANNELS_PER_STREAM;
+
+const RATE: u64 = 48_000;
+/// 1 ms, the packet time every AES67 receiver has to accept.
+const PACKET_FRAMES: usize = 48;
+const RTP_PORT: u16 = 5004;
+const PAYLOAD_TYPE: u8 = 98;
+const TTL: u32 = 15;
+const SAP_ADDRESS: (Ipv4Addr, u16) = (Ipv4Addr::new(239, 255, 255, 255), 9875);
+const SAP_INTERVAL: Duration = Duration::from_secs(30);
+/// PTP time is TAI, which has been this many seconds ahead of UTC since 2017.
+const TAI_MINUS_UTC: Duration = Duration::from_secs(37);
+/// Packets the reader may queue beyond the playout buffer before it blocks.
+const QUEUE_SLACK: usize = 100;
+/// A send time this far from the clock means the clock was stepped or the
+/// process was stalled; the timeline restarts from the clock.
+const MAX_CLOCK_ERROR: u64 = RATE / 10;
+
+pub struct Config {
+    /// Multicast address of the first stream; later streams count up from it.
+    pub address: Ipv4Addr,
+    /// Grandmaster identity as SDP writes it, `00-11-22-FF-FE-33-44-55`.
+    pub gmid: String,
+    pub domain: u8,
+    /// Audio held back before playing, to ride out the decoder's burstiness.
+    pub buffer_ms: usize,
+}
+
+struct Stream {
+    socket: UdpSocket,
+    destination: SocketAddrV4,
+    channels: Range<usize>,
+    ssrc: u32,
+    sequence: u16,
+    sdp: String,
+}
+
+/// Packets of `PACKET_FRAMES` interleaved frames waiting to be sent.
+struct Queue {
+    packets: VecDeque<Vec<f32>>,
+    /// stdin reached its end.
+    closed: bool,
+}
+
+pub fn run(channels: usize, config: &Config) -> Result<(), Box<dyn Error>> {
+    // The address the route to the streams' destination sends from. Binding
+    // to it also makes multicast leave through that interface.
+    let probe = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
+    probe.connect((config.address, RTP_PORT))?;
+    let source = match probe.local_addr()?.ip() {
+        std::net::IpAddr::V4(ip) => ip,
+        std::net::IpAddr::V6(_) => return Err("no IPv4 source address".into()),
+    };
+    let session = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos() as u64
+        ^ u64::from(std::process::id()) << 32;
+
+    let all: Vec<usize> = (0..channels).collect();
+    let mut streams = Vec::new();
+    for (index, map) in all.chunks(CHANNELS_PER_STREAM).enumerate() {
+        let address = Ipv4Addr::from(u32::from(config.address) + index as u32);
+        if !address.is_multicast() {
+            return Err(format!("{address} is not a multicast address").into());
+        }
+        let socket = UdpSocket::bind((source, 0))?;
+        socket.set_multicast_ttl_v4(TTL)?;
+        let name = format!("atmos67 ch {}-{}", map[0] + 1, map[map.len() - 1] + 1);
+        eprintln!("atmos67: sending {name} to {address}:{RTP_PORT} from {source}");
+        streams.push(Stream {
+            socket,
+            destination: SocketAddrV4::new(address, RTP_PORT),
+            channels: map[0]..map[map.len() - 1] + 1,
+            ssrc: (session >> 16) as u32 ^ index as u32,
+            sequence: 0,
+            sdp: sdp(&name, session + index as u64, source, address, map.len(), config),
+        });
+    }
+
+    let announcer = UdpSocket::bind((source, 0))?;
+    announcer.set_multicast_ttl_v4(TTL)?;
+    let announcements: Vec<(u16, String)> = streams
+        .iter()
+        .map(|stream| (stream.ssrc as u16, stream.sdp.clone()))
+        .collect();
+    {
+        let announcer = announcer.try_clone()?;
+        let announcements = announcements.clone();
+        thread::spawn(move || {
+            loop {
+                for (hash, sdp) in &announcements {
+                    // Announcements are best effort; RTP reports a dead network.
+                    let _ = announcer.send_to(&sap(false, *hash, source, sdp), SAP_ADDRESS);
+                }
+                thread::sleep(SAP_INTERVAL);
+            }
+        });
+    }
+
+    let buffer = config.buffer_ms * PACKET_FRAMES * 1000 / RATE as usize;
+    let queue = Arc::new((
+        Mutex::new(Queue { packets: VecDeque::new(), closed: false }),
+        Condvar::new(),
+    ));
+    {
+        let queue = Arc::clone(&queue);
+        thread::spawn(move || read_packets(channels, buffer + QUEUE_SLACK, &queue));
+    }
+
+    let silence = vec![0f32; PACKET_FRAMES * channels];
+    let mut playing = false;
+    let mut send_failed = false;
+    let mut next = ptp_samples(SystemTime::now());
+    loop {
+        let now = ptp_samples(SystemTime::now());
+        if now.abs_diff(next) > MAX_CLOCK_ERROR {
+            next = now;
+        }
+        if next > now {
+            thread::sleep(Duration::from_nanos((next - now) * 1_000_000_000 / RATE));
+        }
+        let packet = {
+            let (lock, wake) = &*queue;
+            let mut queue = lock.lock().expect("reader does not panic");
+            if queue.packets.len() >= buffer.max(1) || queue.closed {
+                playing = true;
+            }
+            let packet = if playing { queue.packets.pop_front() } else { None };
+            if packet.is_none() {
+                if queue.closed {
+                    break;
+                }
+                playing = false;
+            }
+            wake.notify_one();
+            packet
+        };
+        let samples = packet.as_deref().unwrap_or(&silence);
+        for stream in &mut streams {
+            let data = rtp_packet(
+                stream.sequence,
+                next as u32,
+                stream.ssrc,
+                samples,
+                channels,
+                stream.channels.clone(),
+            );
+            stream.sequence = stream.sequence.wrapping_add(1);
+            let sent = stream.socket.send_to(&data, stream.destination);
+            if sent.is_err() != send_failed {
+                send_failed = sent.is_err();
+                match sent {
+                    Err(error) => eprintln!("atmos67: cannot send RTP: {error}"),
+                    Ok(_) => eprintln!("atmos67: sending RTP again"),
+                }
+            }
+        }
+        next += PACKET_FRAMES as u64;
+    }
+    for (hash, sdp) in &announcements {
+        let _ = announcer.send_to(&sap(true, *hash, source, sdp), SAP_ADDRESS);
+    }
+    Ok(())
+}
+
+/// Moves stdin into `queue` one packet at a time, waiting while it holds
+/// `limit` packets. A partial packet at the end of input is dropped.
+fn read_packets(channels: usize, limit: usize, queue: &(Mutex<Queue>, Condvar)) {
+    let (lock, wake) = queue;
+    let mut stdin = io::stdin().lock();
+    let mut bytes = vec![0u8; PACKET_FRAMES * channels * 4];
+    while stdin.read_exact(&mut bytes).is_ok() {
+        let packet = bytes
+            .chunks_exact(4)
+            .map(|b| f32::from_le_bytes(b.try_into().expect("4 bytes")))
+            .collect();
+        let mut queue = lock.lock().expect("sender does not panic");
+        while queue.packets.len() >= limit {
+            queue = wake.wait(queue).expect("sender does not panic");
+        }
+        queue.packets.push_back(packet);
+    }
+    lock.lock().expect("sender does not panic").closed = true;
+}
+
+/// Samples of PTP time at `time` on the system clock.
+fn ptp_samples(time: SystemTime) -> u64 {
+    let tai = time.duration_since(UNIX_EPOCH).unwrap_or_default() + TAI_MINUS_UTC;
+    (tai.as_nanos() * u128::from(RATE) / 1_000_000_000) as u64
+}
+
+/// An RTP packet carrying `stream` of the `channels` interleaved in `samples`.
+fn rtp_packet(
+    sequence: u16,
+    timestamp: u32,
+    ssrc: u32,
+    samples: &[f32],
+    channels: usize,
+    stream: Range<usize>,
+) -> Vec<u8> {
+    let mut packet = Vec::with_capacity(12 + PACKET_FRAMES * stream.len() * 3);
+    packet.extend([0x80, PAYLOAD_TYPE]);
+    packet.extend(sequence.to_be_bytes());
+    packet.extend(timestamp.to_be_bytes());
+    packet.extend(ssrc.to_be_bytes());
+    for frame in samples.chunks_exact(channels) {
+        for sample in &frame[stream.clone()] {
+            let value = (sample.clamp(-1.0, 1.0) * 8_388_607.0).round() as i32;
+            packet.extend(&value.to_be_bytes()[1..]);
+        }
+    }
+    packet
+}
+
+/// The session description aes67-linux-daemon publishes for such a stream.
+fn sdp(
+    name: &str,
+    session: u64,
+    source: Ipv4Addr,
+    address: Ipv4Addr,
+    channels: usize,
+    config: &Config,
+) -> String {
+    format!(
+        "v=0\r\n\
+         o=- {session} 0 IN IP4 {source}\r\n\
+         s={name}\r\n\
+         c=IN IP4 {address}/{TTL}\r\n\
+         t=0 0\r\n\
+         a=clock-domain:PTPv2 {domain}\r\n\
+         m=audio {RTP_PORT} RTP/AVP {PAYLOAD_TYPE}\r\n\
+         c=IN IP4 {address}/{TTL}\r\n\
+         a=rtpmap:{PAYLOAD_TYPE} L24/{RATE}/{channels}\r\n\
+         a=sync-time:0\r\n\
+         a=framecount:{PACKET_FRAMES}\r\n\
+         a=ptime:1\r\n\
+         a=mediaclk:direct=0\r\n\
+         a=ts-refclk:ptp=IEEE1588-2008:{gmid}:{domain}\r\n\
+         a=recvonly\r\n",
+        gmid = config.gmid,
+        domain = config.domain,
+    )
+}
+
+/// A SAP (RFC 2974) announcement of `sdp`, or its deletion.
+fn sap(deletion: bool, hash: u16, origin: Ipv4Addr, sdp: &str) -> Vec<u8> {
+    // Version 1, IPv4 origin, no authentication data.
+    let mut packet = vec![if deletion { 0x24 } else { 0x20 }, 0];
+    packet.extend(hash.to_be_bytes());
+    packet.extend(origin.octets());
+    packet.extend(b"application/sdp\0");
+    packet.extend(sdp.as_bytes());
+    packet
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rtp_packet_carries_one_streams_channels_as_l24() {
+        // Two frames of three channels; the stream is channels 1 and 2.
+        let samples = [0.0, 1.0, -1.0, 0.0, 0.5, 2.0];
+        let packet = rtp_packet(0x0102, 0x0304_0506, 0x0708_090A, &samples, 3, 1..3);
+        assert_eq!(packet[..12], [0x80, 98, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+        assert_eq!(
+            packet[12..],
+            [0x7F, 0xFF, 0xFF, 0x80, 0x00, 0x01, 0x40, 0x00, 0x00, 0x7F, 0xFF, 0xFF]
+        );
+    }
+
+    #[test]
+    fn ptp_time_is_tai() {
+        let time = UNIX_EPOCH + Duration::from_millis(1_500);
+        assert_eq!(ptp_samples(time), (37 * 1000 + 1_500) * 48);
+    }
+
+    #[test]
+    fn sdp_describes_the_stream_and_its_clock() {
+        let config = Config {
+            address: Ipv4Addr::new(239, 69, 67, 1),
+            gmid: "00-11-22-FF-FE-33-44-55".to_owned(),
+            domain: 3,
+            buffer_ms: 100,
+        };
+        let sdp = sdp(
+            "atmos67 ch 9-12",
+            7,
+            Ipv4Addr::new(10, 0, 0, 2),
+            Ipv4Addr::new(239, 69, 67, 2),
+            4,
+            &config,
+        );
+        assert!(sdp.starts_with("v=0\r\no=- 7 0 IN IP4 10.0.0.2\r\ns=atmos67 ch 9-12\r\n"));
+        assert!(sdp.contains("\r\nc=IN IP4 239.69.67.2/15\r\n"));
+        assert!(sdp.contains("\r\nm=audio 5004 RTP/AVP 98\r\n"));
+        assert!(sdp.contains("\r\na=rtpmap:98 L24/48000/4\r\n"));
+        assert!(sdp.contains("\r\na=ts-refclk:ptp=IEEE1588-2008:00-11-22-FF-FE-33-44-55:3\r\n"));
+        assert!(sdp.contains("\r\na=clock-domain:PTPv2 3\r\n"));
+    }
+
+    #[test]
+    fn sap_wraps_the_description() {
+        let packet = sap(false, 0xABCD, Ipv4Addr::new(10, 0, 0, 2), "v=0\r\n");
+        assert_eq!(packet[..8], [0x20, 0, 0xAB, 0xCD, 10, 0, 0, 2]);
+        assert_eq!(&packet[8..], b"application/sdp\0v=0\r\n");
+        assert_eq!(sap(true, 0, Ipv4Addr::LOCALHOST, "")[0], 0x24);
+    }
+}

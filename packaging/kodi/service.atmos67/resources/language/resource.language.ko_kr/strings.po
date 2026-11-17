@@ -1,0 +1,91 @@
+# Kodi Media Center language file
+# Addon Name: atmos67
+# Addon id: service.atmos67
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: ko_KR\n"
+
+msgctxt "#32001"
+msgid "Speakers"
+msgstr "스피커"
+
+msgctxt "#32002"
+msgid "AES67 network"
+msgstr "AES67 네트워크"
+
+msgctxt "#32003"
+msgid "Kodi"
+msgstr "Kodi"
+
+msgctxt "#32010"
+msgid "Speaker layout"
+msgstr "스피커 배치"
+
+msgctxt "#32011"
+msgid "Preset used when no layout file is set."
+msgstr "배치 파일을 지정하지 않았을 때 쓰는 프리셋입니다."
+
+msgctxt "#32012"
+msgid "Layout file"
+msgstr "배치 파일"
+
+msgctxt "#32013"
+msgid "Your own speaker positions as an OpenJOC JSON file. Replaces the preset. Azimuth is positive to the left."
+msgstr "실제 스피커 위치를 적은 OpenJOC JSON 파일입니다. 프리셋 대신 쓰입니다. 방위각은 왼쪽이 양수입니다."
+
+msgctxt "#32020"
+msgid "Network interface"
+msgstr "네트워크 인터페이스"
+
+msgctxt "#32021"
+msgid "Interface the PTP clock runs on."
+msgstr "PTP 클록을 돌릴 인터페이스입니다."
+
+msgctxt "#32022"
+msgid "Multicast address of the first stream"
+msgstr "첫 스트림의 멀티캐스트 주소"
+
+msgctxt "#32023"
+msgid "Speakers are sent 8 to a stream; further streams use the following addresses."
+msgstr "스피커를 8개씩 한 스트림으로 보내며, 다음 스트림은 이어지는 주소를 씁니다."
+
+msgctxt "#32024"
+msgid "PTP domain"
+msgstr "PTP 도메인"
+
+msgctxt "#32025"
+msgid "Must match the PTP domain of the AES67 receivers."
+msgstr "AES67 수신기의 PTP 도메인과 같아야 합니다."
+
+msgctxt "#32026"
+msgid "Buffer (ms)"
+msgstr "버퍼 (ms)"
+
+msgctxt "#32027"
+msgid "Audio held back before sending. Raise it if the sound drops out; compensate with Kodi's audio offset."
+msgstr "보내기 전에 쌓아 두는 오디오입니다. 소리가 끊기면 올리고, 늘어난 지연은 Kodi의 오디오 오프셋으로 맞춥니다."
+
+msgctxt "#32030"
+msgid "Use atmos67 as Kodi's audio output"
+msgstr "Kodi 오디오 출력을 atmos67로 설정"
+
+msgctxt "#32031"
+msgid "Selects the atmos67 device for audio and passthrough and enables passthrough of every format. Sound no longer goes to HDMI."
+msgstr "오디오 출력과 패스스루 장치를 atmos67로 바꾸고 모든 포맷의 패스스루를 켭니다. HDMI로는 소리가 나가지 않게 됩니다."
+
+msgctxt "#32040"
+msgid "The atmos67 package is not installed"
+msgstr "atmos67 패키지가 설치돼 있지 않습니다"
+
+msgctxt "#32041"
+msgid "Could not restart the atmos67 service"
+msgstr "atmos67 서비스를 다시 시작하지 못했습니다"
+
+msgctxt "#32042"
+msgid "Kodi now plays through atmos67."
+msgstr "이제 Kodi가 atmos67로 재생합니다."
+
+msgctxt "#32043"
+msgid "These Kodi settings could not be changed:"
+msgstr "다음 Kodi 설정을 바꾸지 못했습니다:"

@@ -4,6 +4,8 @@
 
 `atmos67`은 HDMI 캡처(IEC 61937 비트스트림이 실린 PCM)를 stdin으로 받아, 설정한 임의 스피커 배치에 맞춘 48 kHz FLOAT32LE PCM을 stdout으로 내보내는 필터다. 뒤에 CamillaDSP(룸 보정)와 aes67-linux-daemon(AES67 송출)이 붙는다. 사용자는 Orange Pi(RK3588) 한 대로 이 체인을 돌리려는 개인 사용자다.
 
+> **범위 변경 (2026-11-17).** 실행 대상이 OSMC Vero V로 바뀌었다(`tasks/vero-v.md`). AES67 송출은 atmos67이 직접 하고(`--aes67-send`), 룸 보정·베이스 매니지먼트·볼륨도 CamillaDSP 대신 atmos67이 SECS 2R 엔진으로 맡는다(`tasks/dsp.md`). 아래 본문은 디코딩 범위의 원래 스펙이다.
+
 지금은 E-AC-3 JOC만 디코딩되고 나머지는 무음이다. 이 스펙의 목표는 **HDMI로 올 수 있는 포맷마다 소리가 맞는 스피커에서 나게 하는 것**이다.
 
 | IEC 61937 타입 | 포맷 | 디코더 | 렌더 |
@@ -25,7 +27,7 @@
 2. 캡처 형식은 실행 중 바뀌지 않는다. 사용자가 `arecord`로 고정하고 `atmos67`에 `--input-channels`(2 또는 8)와 `--input-rate`(기본 192000)로 알려 준다. 8채널 캡처에서는 8채널 전체에 실린 버스트(HBR: TrueHD, DTS-HD)와 앞 2채널에만 실린 버스트(AC-3, E-AC-3, DTS)를 모두 찾는다.
 3. 버스트가 없는 입력(LPCM)은 지금처럼 무음이다. 비트스트림을 PCM으로 오인해 스피커로 내보내는 사고를 막기 위해서다.
 4. FFmpeg는 libavcodec을 `ffmpeg-next` 크레이트로 링크해 쓴다(별도 프로세스가 아니라 패킷 단위 동기 디코딩). 빌드와 실행 환경에 FFmpeg 라이브러리가 필요해진다.
-5. LFE 채널은 배치에 `lfe` 역할 스피커가 있으면 그리로 보내고, 없으면 버린다(베이스 매니지먼트는 CamillaDSP/SECS 2R의 일이다).
+5. LFE 채널은 배치에 `lfe` 역할 스피커가 있으면 그리로 보내고, 없으면 버린다. 베이스 매니지먼트는 송출기의 DSP가 맡는다(`tasks/dsp.md`).
 
 ### 렌더러
 
@@ -42,6 +44,7 @@
 - `openjoc-api`, `openjoc-scene` (git, 커밋 고정) — E-AC-3 JOC, 배치 파일 파싱
 - `truehd` (crates.io) — TrueHD 디코딩과 OAMD
 - `ffmpeg-next` (crates.io) + 시스템 FFmpeg 라이브러리 — AC-3, E-AC-3, DTS 계열
+- SECS 2R 공개 크레이트 (crates.io, AGPL-3.0-only) — 측정과 보정 계산 (`tasks/dsp.md`)
 
 ## Commands
 
@@ -66,7 +69,9 @@ src/decode/joc.rs    OpenJOC 세션 (현행 코드를 옮김)
 src/decode/ffmpeg.rs libavcodec 디코더 (AC-3, E-AC-3, DTS)
 src/decode/truehd.rs truehd 크레이트 디코더와 OAMD → 객체
 src/aes67.rs         aes67-linux-daemon 소스 구성 출력 (현행)
+src/send.rs          사용자 공간 AES67 송출 (RTP + SAP)
 tests/e2e.rs         합성 픽스처 E2E
+tests/send.rs        송출기 E2E
 tests/samples.rs     samples/ 기반 시험 (#[ignore])
 tests/fixtures/      FFmpeg로 만든 작은 합성 스트림과 배치 파일
 samples/             실제 테스트 파일 (git 제외)

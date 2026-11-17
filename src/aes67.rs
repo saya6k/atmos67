@@ -2,7 +2,7 @@
 //! and which channels of the RAVENNA ALSA playback device feed each one.
 
 /// AES67 receivers are only required to accept streams of up to 8 channels.
-const CHANNELS_PER_STREAM: usize = 8;
+pub const CHANNELS_PER_STREAM: usize = 8;
 
 /// Returns a daemon status file sending `channels` ALSA playback channels, in
 /// order, as 48 kHz L24 streams with 1 ms packets (the AES67 baseline).

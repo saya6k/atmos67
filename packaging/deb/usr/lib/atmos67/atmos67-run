@@ -1,0 +1,63 @@
+#!/bin/sh
+# Captures what Kodi plays into the ALSA loopback, decodes it and sends the
+# speakers as AES67 streams. The sender runs for as long as the service does;
+# the capture and the decoder restart whenever Kodi reopens the loopback,
+# because the capture has to be opened in the format Kodi chose.
+set -u
+
+if [ -n "${LAYOUT_FILE:-}" ]; then
+    set -- --layout-file "$LAYOUT_FILE"
+else
+    set -- --layout "$LAYOUT"
+fi
+
+# The PTP grandmaster in SDP notation (00-11-22-FF-FE-33-44-55), empty while
+# ptp4l is not answering.
+grandmaster() {
+    pmc -u -b 0 -d "$PTP_DOMAIN" 'GET PARENT_DATA_SET' 2>/dev/null \
+        | sed -n 's/.*grandmasterIdentity *//p' | tr -d . | tr a-f A-F | sed 's/../&-/g; s/-$//'
+}
+
+gmid=$(grandmaster)
+until [ -n "$gmid" ]; do
+    sleep 1
+    gmid=$(grandmaster)
+done
+
+# The stream descriptions name the grandmaster. When another clock takes over,
+# exit so that systemd restarts the service with the new one.
+(
+    while sleep 10; do
+        now=$(grandmaster)
+        if [ -n "$now" ] && [ "$now" != "$gmid" ]; then
+            echo "atmos67: PTP grandmaster changed from $gmid to $now" >&2
+            kill $$
+        fi
+    done
+) &
+
+# How Kodi has the loopback open: "closed", or its format, channels and rate.
+params=/proc/asound/Loopback/pcm0p/sub0/hw_params
+pidfile=/run/atmos67-arecord.pid
+
+while :; do
+    state=$(cat "$params" 2>/dev/null)
+    format=$(echo "$state" | sed -n 's/^format: //p')
+    channels=$(echo "$state" | sed -n 's/^channels: //p')
+    rate=$(echo "$state" | sed -n 's/^rate: \([0-9]*\).*/\1/p')
+    # Passthrough arrives as 16-bit stereo or, for TrueHD and DTS-HD, 8 channels.
+    if [ "$format" != S16_LE ] || { [ "$channels" != 2 ] && [ "$channels" != 8 ]; }; then
+        sleep 0.2
+        continue
+    fi
+    arecord -q -D hw:Loopback,1,0 -t raw -f S16_LE -c "$channels" -r "$rate" \
+        --period-time=10000 --buffer-time=200000 --process-id-file "$pidfile" \
+        | atmos67 "$@" --input-channels "$channels" --input-rate "$rate" &
+    while [ "$(cat "$params" 2>/dev/null)" = "$state" ] && kill -0 $! 2>/dev/null; do
+        sleep 0.2
+    done
+    # Stopping the capture ends the decoder with its input.
+    kill "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null
+    wait $!
+done | atmos67 "$@" --aes67-send --aes67-address "$ADDRESS" --aes67-buffer-ms "$BUFFER_MS" \
+    --ptp-gmid "$gmid" --ptp-domain "$PTP_DOMAIN"
