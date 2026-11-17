@@ -14,6 +14,9 @@ SPEED_OF_SOUND = 343.0
 VOLUME_RANGE_DB = 60.0
 # The sender's volume while Kodi is muted.
 MUTED_DB = -120.0
+# What the sender cannot see: the loopback capture (10 ms periods) and the
+# decoder's access units (up to 32 ms for Dolby Digital). An estimate.
+DECODE_ALLOWANCE_MS = 40.0
 
 
 def quote(value):
@@ -33,6 +36,21 @@ def volume_db(percent, muted, max_db):
     if muted or percent <= 0:
         return MUTED_DB
     return round(max_db - VOLUME_RANGE_DB * (1.0 - percent / 100.0), 2)
+
+
+def answer_value(answer):
+    """The value of a sender answer `ok <value>`."""
+    status, _, value = answer.partition(" ")
+    if status != "ok" or not value:
+        raise ValueError(answer)
+    return float(value)
+
+
+def av_offset(sender_ms, receiver_ms, trim_ms):
+    """Kodi's audio offset in seconds for audio that arrives this late.
+
+    Negative: Kodi holds the picture back until the sound catches up."""
+    return -round((sender_ms + DECODE_ALLOWANCE_MS + receiver_ms + trim_ms) / 1000.0, 3)
 
 
 def pairs(values):

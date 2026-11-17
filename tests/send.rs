@@ -189,7 +189,19 @@ fn corrects_with_a_secs_design() {
     let first = Ipv4Addr::new(239, 69, 67, 211);
     let input = input();
     let ports = listen(first, 2);
-    let child = spawn(first, &["--dsp", folder.to_str().unwrap()]);
+    let socket = folder.with_extension("control");
+    let child = spawn(first, &["--dsp", folder.to_str().unwrap(), "--control", socket.to_str().unwrap()]);
+    let connection = (0..50)
+        .find_map(|_| {
+            std::thread::sleep(Duration::from_millis(100));
+            UnixStream::connect(&socket).ok()
+        })
+        .expect("control socket");
+    (&connection).write_all(b"latency\n").unwrap();
+    let mut reply = String::new();
+    BufReader::new(&connection).read_line(&mut reply).unwrap();
+    // The 50 ms buffer and the correction's 1024-frame block.
+    assert_eq!(reply, "ok 71.3\n");
     let received = receive(ports, child, &[8, 4], &input);
     // Rendered FL FR FC LFE Lb Rb Ls Rs TFL … TBR leave in the design's order,
     // L R C Ls Rs Lb Rb Tfl … Tbr, then SW1.
@@ -216,10 +228,12 @@ fn takes_volume_commands_on_its_socket() {
             UnixStream::connect(&socket).ok()
         })
         .expect("control socket");
-    connection.write_all(b"volume -12.0412\nvolume loud\n").unwrap();
+    connection.write_all(b"volume -12.0412\nvolume loud\nlatency\n").unwrap();
     let mut replies = BufReader::new(connection).lines();
     assert_eq!(replies.next().unwrap().unwrap(), "ok");
     assert!(replies.next().unwrap().unwrap().starts_with("error: "));
+    // Without a correction, only the 50 ms playout buffer.
+    assert_eq!(replies.next().unwrap().unwrap(), "ok 50.0");
 
     let input = input();
     let received = receive(ports, child, &[8, 4], &input);
@@ -249,13 +263,16 @@ fn plays_measurement_frames_from_its_socket_in_place_of_the_program() {
     (&connection).write_all(&message).unwrap();
     let mut reply = String::new();
     BufReader::new(&connection).read_line(&mut reply).unwrap();
-    assert_eq!(reply, "ok\n");
+    // The answer carries the PTP time the first frame was sent at.
+    let started: u64 = reply.strip_prefix("ok ").expect(&reply).trim().parse().unwrap();
 
     let mut first_stream = Vec::new();
+    let mut first_timestamp = None;
     let mut packet = [0u8; 2048];
     while first_stream.len() < 3 * 48 * 8 {
         let (n, _) = rtp.recv_from(&mut packet).expect("sender stopped early");
         if n - 12 == 8 * 48 * 3 && (!first_stream.is_empty() || packet[12..n].iter().any(|b| *b != 0)) {
+            first_timestamp.get_or_insert(u32::from_be_bytes(packet[4..8].try_into().unwrap()));
             first_stream.extend(packet[12..n].as_chunks::<3>().0.iter().map(|b| i32::from_be_bytes([b[0], b[1], b[2], 0]) >> 8));
         }
     }
@@ -270,4 +287,5 @@ fn plays_measurement_frames_from_its_socket_in_place_of_the_program() {
         .chain(std::iter::repeat_n(0, 44 * 8))
         .collect();
     assert_eq!(first_stream, want);
+    assert_eq!(first_timestamp, Some(started as u32));
 }

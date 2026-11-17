@@ -104,6 +104,36 @@ def send_volume(percent, muted):
         xbmc.log(f"{ADDON_ID}: volume not sent: {error}", xbmc.LOGDEBUG)
 
 
+def kodi_rpc(method, params):
+    request = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+    return json.loads(xbmc.executeJSONRPC(json.dumps(request)))
+
+
+def sync_picture():
+    """Delays the picture by the time the sound takes to reach the speakers."""
+    current = addon()
+    if current.getSetting("auto_av_offset") != "true":
+        return
+    try:
+        sender_ms = common.answer_value(common.command("latency"))
+    except (OSError, ValueError) as error:
+        xbmc.log(f"{ADDON_ID}: no latency from the sender: {error}", xbmc.LOGWARNING)
+        return
+    offset = common.av_offset(sender_ms, float(current.getSetting("receiver_latency_ms") or 0),
+                              float(current.getSetting("av_trim_ms") or 0))
+    players = kodi_rpc("Player.GetActivePlayers", {}).get("result", [])
+    video = [p["playerid"] for p in players if p.get("type") == "video"]
+    if video:
+        result = kodi_rpc("Player.SetAudioDelay", {"playerid": video[0], "offset": offset})
+        xbmc.log(f"{ADDON_ID}: audio offset {offset} s: {result}", xbmc.LOGINFO)
+
+
+class Player(xbmc.Player):
+    def onAVStarted(self):
+        if self.isPlayingVideo():
+            sync_picture()
+
+
 class Monitor(xbmc.Monitor):
     def onSettingsChanged(self):
         apply()
@@ -115,6 +145,7 @@ class Monitor(xbmc.Monitor):
 
 
 if __name__ == "__main__":
+    player = Player()
     monitor = Monitor()
     apply()
     monitor.waitForAbort()

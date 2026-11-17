@@ -134,7 +134,7 @@ impl OutputSession for Output {
         socket.write_all(&message).map_err(backend_error)?;
         let mut reply = String::new();
         BufReader::new(socket).read_line(&mut reply).map_err(backend_error)?;
-        if reply.trim_end() != "ok" {
+        if !reply.starts_with("ok") {
             return Err(backend_error(format!("sender: {}", reply.trim_end())));
         }
         Ok(PlaybackReport {

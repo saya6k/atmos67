@@ -53,6 +53,18 @@ class VolumeTest(unittest.TestCase):
         self.assertEqual(common.volume_db(80, True, 0.0), common.MUTED_DB)
 
 
+class SyncTest(unittest.TestCase):
+    def test_holds_the_picture_back_by_the_whole_audio_path(self):
+        # Sender 71.3 ms, decoder allowance 40 ms, receiver 5 ms, trim -6.3 ms.
+        self.assertEqual(common.av_offset(71.3, 5.0, -6.3), -0.11)
+
+    def test_reads_sender_answers(self):
+        self.assertEqual(common.answer_value("ok 71.3"), 71.3)
+        for answer in ["ok", "error: unknown command", ""]:
+            with self.assertRaises(ValueError):
+                common.answer_value(answer)
+
+
 class SocketTest(unittest.TestCase):
     def test_sends_a_line_and_reads_the_answer(self):
         path = os.path.join(tempfile.mkdtemp(), "control")

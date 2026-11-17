@@ -23,6 +23,9 @@ pub struct Design {
     routing: Vec<usize>,
     channels_in: usize,
     pub outputs: Vec<String>,
+    /// How much the correction delays the sound: its block, and the filter
+    /// latency SECS 2R reports for its designs.
+    pub latency_ms: f64,
     /// Frames waiting for a whole block, one buffer per pipeline input.
     pending: Vec<Vec<f64>>,
 }
@@ -91,7 +94,15 @@ impl Design {
         if let Some((_, label)) = labels.iter().enumerate().find(|(index, _)| !routing.contains(index)) {
             return Err(format!("speaker {label} is not in the design").into());
         }
-        Ok(Design { pipeline, channels_in: labels.len(), outputs, pending: vec![Vec::with_capacity(BLOCK); inputs.len()], routing })
+        let latency_ms = manifest["latency_ms"].as_f64().unwrap_or(0.0) + BLOCK as f64 * 1000.0 / 48_000.0;
+        Ok(Design {
+            pipeline,
+            channels_in: labels.len(),
+            outputs,
+            latency_ms,
+            pending: vec![Vec::with_capacity(BLOCK); inputs.len()],
+            routing,
+        })
     }
 
     /// Takes interleaved rendered frames and appends the corrected frames of
