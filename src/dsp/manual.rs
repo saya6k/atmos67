@@ -165,15 +165,12 @@ pub fn write(folder: &Path, labels: &[String], base: Option<&Path>, settings: &S
 /// Copies a SECS export's manifest and coefficient files into `folder` and
 /// returns them with its configuration's lines.
 fn copy_base(base: &Path, folder: &Path) -> Result<(serde_json::Value, Vec<String>)> {
-    let manifest = serde_json::from_slice(&fs::read(base.join("secs-design.json"))?)?;
-    let configs: Vec<_> = fs::read_dir(base.join("configs"))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|e| e == "yml"))
-        .collect();
-    let [config] = configs.as_slice() else {
-        return Err(format!("{} must hold exactly one .yml", base.join("configs").display()).into());
-    };
-    let text = fs::read_to_string(config)?;
+    let mut manifest: serde_json::Value = serde_json::from_slice(&fs::read(base.join("secs-design.json"))?)?;
+    let text = fs::read_to_string(super::design::config_path(base, &manifest)?)?;
+    // Only the correcting configuration is copied.
+    if let Some(manifest) = manifest.as_object_mut() {
+        manifest.remove("bypass_config");
+    }
     if base.join("coeffs").is_dir() {
         fs::create_dir_all(folder.join("coeffs"))?;
         for entry in fs::read_dir(base.join("coeffs"))? {

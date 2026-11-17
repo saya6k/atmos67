@@ -33,7 +33,8 @@ const USAGE: &str = "usage: atmos67 (--layout PRESET | --layout-file LAYOUT.json
            [--dsp SECS_EXPORT_DIR] [--volume DB] [--control SOCKET] < speakers.f32le
        atmos67 (--layout PRESET | --layout-file LAYOUT.json) --write-design DIR [--base SECS_EXPORT_DIR]
            [--subs N] [--crossover front|center|surround|back|top=HZ]... [--slope 12|24]
-           [--trim ROLE=DB]... [--delay ROLE=MS]...";
+           [--trim ROLE=DB]... [--delay ROLE=MS]...
+       atmos67 (--layout PRESET | --layout-file LAYOUT.json) --dsp DIR --dsp-only < speakers.f32le > corrected.f32le";
 
 const OUTPUT_RATE: u64 = 48_000;
 
@@ -63,6 +64,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     let mut dsp = None;
     let mut write_design = None;
+    let mut dsp_only = false;
     let mut base = None;
     let mut manual = dsp::manual::Settings { order: 4, ..Default::default() };
     // `NAME=NUMBER`, as the --crossover, --trim and --delay flags take.
@@ -87,6 +89,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             "--dsp" => dsp = Some(std::path::PathBuf::from(value()?)),
             "--volume" => send_config.volume_db = value()?.parse()?,
             "--control" => send_config.control = Some(value()?.into()),
+            "--dsp-only" => dsp_only = true,
             "--write-design" => write_design = Some(std::path::PathBuf::from(value()?)),
             "--base" => base = Some(std::path::PathBuf::from(value()?)),
             "--subs" => manual.subs = value()?.parse()?,
@@ -136,6 +139,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     if let Some(folder) = write_design {
         dsp::manual::write(&folder, &info.channel_labels, base.as_deref(), &manual)?;
+        return Ok(());
+    }
+    if dsp_only {
+        let folder = dsp.ok_or(USAGE)?;
+        let mut design = dsp::design::Design::load(&folder, &info.channel_labels)
+            .map_err(|e| format!("{}: {e}", folder.display()))?;
+        let (mut stdin, mut stdout) = (io::stdin().lock(), io::stdout().lock());
+        let mut bytes = vec![0u8; 4 * info.channel_count * dsp::design::BLOCK];
+        let mut corrected = Vec::new();
+        while stdin.read_exact(&mut bytes).is_ok() {
+            let frames: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
+            corrected.clear();
+            design.push(&frames, &mut corrected);
+            let out: Vec<u8> = corrected.iter().flat_map(|s| s.to_le_bytes()).collect();
+            stdout.write_all(&out)?;
+        }
         return Ok(());
     }
     if send {

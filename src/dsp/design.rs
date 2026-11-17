@@ -1,15 +1,15 @@
 //! A SECS 2R CamillaDSP export folder as the sender's correction.
 //!
 //! The folder holds `secs-design.json`, whose `inputs` and `outputs` name
-//! the pipeline's channels by SECS speaker role, and one configuration
-//! under `configs/`. Inputs are matched to the rendered speakers by name;
+//! the pipeline's channels by SECS speaker role, and under `configs/` the
+//! correcting configuration, beside a bypass one the manifest names. Inputs are matched to the rendered speakers by name;
 //! a speaker the design does not cover, or a design input with no speaker,
 //! is refused rather than played silently. Outputs follow the design: its
 //! main speakers, then its subwoofers.
 
 use std::error::Error;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::camilla::{Config, Pipeline};
 use crate::layout::canonical;
@@ -25,6 +25,22 @@ pub struct Design {
     pub outputs: Vec<String>,
     /// Frames waiting for a whole block, one buffer per pipeline input.
     pending: Vec<Vec<f64>>,
+}
+
+/// The correcting configuration of the export in `folder`, described by
+/// `manifest`: the one `.yml` under `configs/` that is not the bypass.
+pub fn config_path(folder: &Path, manifest: &serde_json::Value) -> Result<PathBuf, Box<dyn Error>> {
+    let bypass = manifest["bypass_config"].as_str().map(|p| folder.join(p));
+    let configs: Vec<PathBuf> = fs::read_dir(folder.join("configs"))?
+        .map(|entry| entry.map(|e| e.path()))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|p| p.extension().is_some_and(|e| e == "yml") && Some(p) != bypass.as_ref())
+        .collect();
+    match configs.as_slice() {
+        [config] => Ok(config.clone()),
+        _ => Err(format!("{} must hold exactly one correcting .yml", folder.join("configs").display()).into()),
+    }
 }
 
 /// The rendered speaker name of a SECS 2R input role.
@@ -57,14 +73,7 @@ impl Design {
         };
         let (inputs, outputs) = (names("inputs")?, names("outputs")?);
 
-        let configs: Vec<_> = fs::read_dir(folder.join("configs"))?
-            .map(|entry| entry.map(|e| e.path()))
-            .filter(|path| path.as_ref().map_or(true, |p| p.extension().is_some_and(|e| e == "yml")))
-            .collect::<Result<_, _>>()?;
-        let [config] = configs.as_slice() else {
-            return Err(format!("{} must hold exactly one .yml", folder.join("configs").display()).into());
-        };
-        let config = Config::load(config)?;
+        let config = Config::load(&config_path(folder, &manifest)?)?;
         let pipeline = Pipeline::new(&config, BLOCK)?;
         if pipeline.inputs() != inputs.len() || pipeline.outputs() != outputs.len() {
             return Err("the configuration and secs-design.json disagree on the channel count".into());
@@ -101,5 +110,23 @@ impl Design {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn picks_the_correcting_configuration_over_the_bypass() {
+        let folder = std::env::temp_dir().join(format!("atmos67-configs-{}", std::process::id()));
+        fs::create_dir_all(folder.join("configs")).unwrap();
+        for name in ["room.yml", "room_bypass.yml"] {
+            fs::write(folder.join("configs").join(name), "").unwrap();
+        }
+        let manifest = serde_json::json!({ "bypass_config": "configs/room_bypass.yml" });
+        assert_eq!(config_path(&folder, &manifest).unwrap(), folder.join("configs/room.yml"));
+        assert!(config_path(&folder, &serde_json::json!({})).is_err());
+        fs::remove_dir_all(folder).unwrap();
     }
 }

@@ -88,9 +88,11 @@ fn compare(root: &Path) {
 
     let mut camilla = Vec::new();
     files(&root.join("camilla"), &mut camilla);
-    let yml = camilla.iter().find(|p| p.extension().is_some_and(|e| e == "yml")).expect("a .yml");
     let manifest = camilla.iter().find(|p| p.ends_with("secs-design.json")).expect("secs-design.json");
+    let folder = manifest.parent().unwrap();
     let manifest: serde_json::Value = serde_json::from_slice(&fs::read(manifest).unwrap()).unwrap();
+    // The export also holds a bypass configuration, which must not be picked.
+    let yml = &super::design::config_path(folder, &manifest).unwrap();
     let names = |key: &str| -> Vec<String> {
         manifest[key].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect()
     };
