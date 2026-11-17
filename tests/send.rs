@@ -226,3 +226,48 @@ fn takes_volume_commands_on_its_socket() {
     let expected: Vec<f32> = input.iter().map(|s| s * 0.25).collect();
     check(&received, &[8, 4], &expected, 1);
 }
+
+#[test]
+fn plays_measurement_frames_from_its_socket_in_place_of_the_program() {
+    let _ports = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let socket = std::env::temp_dir().join(format!("atmos67-play-{}", std::process::id()));
+    let first = Ipv4Addr::new(239, 69, 67, 231);
+    let Ports { rtp, .. } = listen(first, 2);
+    // A low volume, which measurement signals do not take.
+    let mut child = spawn(first, &["--volume", "-40", "--control", socket.to_str().unwrap()]);
+    let connection = (0..50)
+        .find_map(|_| {
+            std::thread::sleep(Duration::from_millis(100));
+            UnixStream::connect(&socket).ok()
+        })
+        .expect("control socket");
+
+    // 100 frames: two whole packets and a part one, padded with silence.
+    let frames: Vec<f32> = (0..100 * CHANNELS).map(|i| (i + 1) as f32 / 10_000.0).collect();
+    let mut message = format!("play {CHANNELS} 100\n").into_bytes();
+    message.extend(frames.iter().flat_map(|s| s.to_le_bytes()));
+    (&connection).write_all(&message).unwrap();
+    let mut reply = String::new();
+    BufReader::new(&connection).read_line(&mut reply).unwrap();
+    assert_eq!(reply, "ok\n");
+
+    let mut first_stream = Vec::new();
+    let mut packet = [0u8; 2048];
+    while first_stream.len() < 3 * 48 * 8 {
+        let (n, _) = rtp.recv_from(&mut packet).expect("sender stopped early");
+        if n - 12 == 8 * 48 * 3 && (!first_stream.is_empty() || packet[12..n].iter().any(|b| *b != 0)) {
+            first_stream.extend(packet[12..n].as_chunks::<3>().0.iter().map(|b| i32::from_be_bytes([b[0], b[1], b[2], 0]) >> 8));
+        }
+    }
+    drop(child.stdin.take());
+    assert!(child.wait().unwrap().success());
+    let want: Vec<i32> = frames
+        .as_chunks::<CHANNELS>()
+        .0
+        .iter()
+        .flat_map(|f| f[..8].to_vec())
+        .map(|s| (s * 8_388_607.0).round() as i32)
+        .chain(std::iter::repeat_n(0, 44 * 8))
+        .collect();
+    assert_eq!(first_stream, want);
+}

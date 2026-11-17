@@ -8,6 +8,9 @@ mod dsp;
 mod iec61937;
 mod layout;
 mod mat;
+// Used by the calibration command (tasks/dsp.md D8).
+#[allow(dead_code)]
+mod measure;
 mod render;
 mod send;
 

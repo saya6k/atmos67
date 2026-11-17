@@ -14,6 +14,11 @@
 //! and may add subwoofer channels. The volume is applied to each packet as it
 //! leaves, ramped across the packet, so a change is heard at once without a
 //! click; a Unix socket takes `volume <dB>` and `mute 0|1` lines.
+//!
+//! For measurement the socket also takes `play <channels> <frames>` followed
+//! by that many interleaved FLOAT32LE frames of the output channels. They are
+//! sent from the next packet on, contiguously and as they are, in place of
+//! the program, and `ok` answers once the last of them has left.
 
 use std::collections::VecDeque;
 use std::error::Error;
@@ -23,7 +28,7 @@ use std::ops::Range;
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -76,16 +81,26 @@ struct Queue {
     closed: bool,
 }
 
+/// A measurement signal waiting to be sent in place of the program.
+#[derive(Default)]
+struct Measurement {
+    packets: VecDeque<Vec<f32>>,
+    /// Told when the last packet has been sent.
+    done: Option<mpsc::Sender<()>>,
+}
+
 /// Sends `channels_in` rendered channels, through `design` when there is one.
 pub fn run(channels_in: usize, config: &Config, design: Option<Design>) -> Result<(), Box<dyn Error>> {
     let channels = design.as_ref().map_or(channels_in, |d| d.outputs.len());
     let gain = Arc::new(AtomicU32::new(Volume { db: config.volume_db, muted: false }.gain().to_bits()));
+    let measurement = Arc::new(Mutex::new(Measurement::default()));
     if let Some(path) = &config.control {
         let _ = std::fs::remove_file(path);
         let listener = UnixListener::bind(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let gain = Arc::clone(&gain);
+        let measurement = Arc::clone(&measurement);
         let volume = Volume { db: config.volume_db, muted: false };
-        thread::spawn(move || control(&listener, volume, &gain));
+        thread::spawn(move || control(&listener, volume, &gain, &measurement, channels));
     }
 
     // The address the route to the streams' destination sends from. Binding
@@ -180,8 +195,16 @@ pub fn run(channels_in: usize, config: &Config, design: Option<Design>) -> Resul
             wake.notify_one();
             packet
         };
+        let (measured, finished) = {
+            let mut measurement = measurement.lock().expect("control does not panic");
+            let packet = measurement.packets.pop_front();
+            let last = packet.is_some() && measurement.packets.is_empty();
+            (packet, if last { measurement.done.take() } else { None })
+        };
         let target = f32::from_bits(gain.load(Ordering::Relaxed));
-        let samples = match packet.as_deref() {
+        let samples = match (measured.as_deref(), packet.as_deref()) {
+            (Some(measured), _) => measured,
+            (None, packet) => match packet {
             Some(packet) if current != 1.0 || target != 1.0 => {
                 scaled.clear();
                 scaled.extend_from_slice(packet);
@@ -190,6 +213,7 @@ pub fn run(channels_in: usize, config: &Config, design: Option<Design>) -> Resul
             }
             Some(packet) => packet,
             None => &silence,
+            },
         };
         current = target;
         for stream in &mut streams {
@@ -210,6 +234,9 @@ pub fn run(channels_in: usize, config: &Config, design: Option<Design>) -> Resul
                     Ok(_) => eprintln!("atmos67: sending RTP again"),
                 }
             }
+        }
+        if let Some(done) = finished {
+            let _ = done.send(());
         }
         next += PACKET_FRAMES as u64;
     }
@@ -268,6 +295,40 @@ impl Volume {
     }
 }
 
+/// Reads the frames of a `play` command and waits until they have been sent.
+fn play(
+    reader: &mut impl Read,
+    count: &str,
+    frames: &str,
+    channels: usize,
+    measurement: &Mutex<Measurement>,
+) -> Result<(), String> {
+    let (Ok(count), Ok(frames)) = (count.parse::<usize>(), frames.parse::<usize>()) else {
+        return Err("play takes a channel count and a frame count".into());
+    };
+    let mut bytes = vec![0u8; count * frames * 4];
+    reader.read_exact(&mut bytes).map_err(|e| format!("reading frames: {e}"))?;
+    if count != channels {
+        return Err(format!("{count} channels given, {channels} sent"));
+    }
+    let mut samples: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
+    let size = PACKET_FRAMES * channels;
+    samples.resize(samples.len().div_ceil(size) * size, 0.0);
+    let (done, finished) = mpsc::channel();
+    {
+        let mut measurement = measurement.lock().expect("sender does not panic");
+        if !measurement.packets.is_empty() {
+            return Err("already playing".into());
+        }
+        measurement.packets = samples.chunks(size).map(<[f32]>::to_vec).collect();
+        if measurement.packets.is_empty() {
+            return Ok(());
+        }
+        measurement.done = Some(done);
+    }
+    finished.recv().map_err(|_| "the sender stopped".to_string())
+}
+
 /// Scales `samples` from `from` to `to` across the packet, frame by frame.
 fn ramp(samples: &mut [f32], channels: usize, from: f32, to: f32) {
     for (n, frame) in samples.chunks_exact_mut(channels).enumerate() {
@@ -276,12 +337,20 @@ fn ramp(samples: &mut [f32], channels: usize, from: f32, to: f32) {
     }
 }
 
-/// Serves volume commands, one per line, answering `ok` or `error: …`.
-fn control(listener: &UnixListener, mut volume: Volume, gain: &AtomicU32) {
+/// Serves commands, one per line, answering each with `ok` or `error: …`.
+fn control(listener: &UnixListener, mut volume: Volume, gain: &AtomicU32, measurement: &Mutex<Measurement>, channels: usize) {
     for connection in listener.incoming().flatten() {
         let Ok(mut writer) = connection.try_clone() else { continue };
-        for line in BufReader::new(connection).lines().map_while(Result::ok) {
+        let mut reader = BufReader::new(connection);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            if !matches!(reader.read_line(&mut line), Ok(1..)) {
+                break;
+            }
+            let line = line.trim_end();
             let reply = match line.split_whitespace().collect::<Vec<_>>()[..] {
+                ["play", count, frames] => play(&mut reader, count, frames, channels, measurement),
                 ["volume", db] => match db.parse::<f64>() {
                     Ok(db) if db.is_finite() => {
                         volume.db = db;
