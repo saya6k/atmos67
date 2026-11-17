@@ -9,17 +9,26 @@
 //!
 //! The streams never stop: while stdin has nothing to play they carry
 //! silence, so receivers stay locked between titles.
+//!
+//! A SECS 2R design, when given, corrects the speakers before they are sent
+//! and may add subwoofer channels. The volume is applied to each packet as it
+//! leaves, ramped across the packet, so a change is heard at once without a
+//! click; a Unix socket takes `volume <dB>` and `mute 0|1` lines.
 
 use std::collections::VecDeque;
 use std::error::Error;
-use std::io::{self, Read};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::ops::Range;
+use std::os::unix::net::UnixListener;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::aes67::CHANNELS_PER_STREAM;
+use crate::dsp::design::Design;
 
 const RATE: u64 = 48_000;
 /// 1 ms, the packet time every AES67 receiver has to accept.
@@ -45,6 +54,10 @@ pub struct Config {
     pub domain: u8,
     /// Audio held back before playing, to ride out the decoder's burstiness.
     pub buffer_ms: usize,
+    /// Starting volume in dB.
+    pub volume_db: f64,
+    /// Where to listen for volume commands.
+    pub control: Option<PathBuf>,
 }
 
 struct Stream {
@@ -63,7 +76,18 @@ struct Queue {
     closed: bool,
 }
 
-pub fn run(channels: usize, config: &Config) -> Result<(), Box<dyn Error>> {
+/// Sends `channels_in` rendered channels, through `design` when there is one.
+pub fn run(channels_in: usize, config: &Config, design: Option<Design>) -> Result<(), Box<dyn Error>> {
+    let channels = design.as_ref().map_or(channels_in, |d| d.outputs.len());
+    let gain = Arc::new(AtomicU32::new(Volume { db: config.volume_db, muted: false }.gain().to_bits()));
+    if let Some(path) = &config.control {
+        let _ = std::fs::remove_file(path);
+        let listener = UnixListener::bind(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let gain = Arc::clone(&gain);
+        let volume = Volume { db: config.volume_db, muted: false };
+        thread::spawn(move || control(&listener, volume, &gain));
+    }
+
     // The address the route to the streams' destination sends from. Binding
     // to it also makes multicast leave through that interface.
     let probe = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
@@ -123,10 +147,12 @@ pub fn run(channels: usize, config: &Config) -> Result<(), Box<dyn Error>> {
     ));
     {
         let queue = Arc::clone(&queue);
-        thread::spawn(move || read_packets(channels, buffer + QUEUE_SLACK, &queue));
+        thread::spawn(move || read_packets(channels_in, design, buffer + QUEUE_SLACK, &queue));
     }
 
     let silence = vec![0f32; PACKET_FRAMES * channels];
+    let mut current = 1f32;
+    let mut scaled = Vec::new();
     let mut playing = false;
     let mut send_failed = false;
     let mut next = ptp_samples(SystemTime::now());
@@ -154,7 +180,18 @@ pub fn run(channels: usize, config: &Config) -> Result<(), Box<dyn Error>> {
             wake.notify_one();
             packet
         };
-        let samples = packet.as_deref().unwrap_or(&silence);
+        let target = f32::from_bits(gain.load(Ordering::Relaxed));
+        let samples = match packet.as_deref() {
+            Some(packet) if current != 1.0 || target != 1.0 => {
+                scaled.clear();
+                scaled.extend_from_slice(packet);
+                ramp(&mut scaled, channels, current, target);
+                &scaled
+            }
+            Some(packet) => packet,
+            None => &silence,
+        };
+        current = target;
         for stream in &mut streams {
             let data = rtp_packet(
                 stream.sequence,
@@ -182,21 +219,89 @@ pub fn run(channels: usize, config: &Config) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Moves stdin into `queue` one packet at a time, waiting while it holds
-/// `limit` packets. A partial packet at the end of input is dropped.
-fn read_packets(channels: usize, limit: usize, queue: &(Mutex<Queue>, Condvar)) {
+/// Moves stdin into `queue` one packet at a time, through `design` when
+/// there is one, waiting while it holds `limit` packets. Input short of a
+/// whole packet, or of a whole design block, at the end is dropped.
+fn read_packets(channels: usize, mut design: Option<Design>, limit: usize, queue: &(Mutex<Queue>, Condvar)) {
     let (lock, wake) = queue;
     let mut stdin = io::stdin().lock();
     let mut bytes = vec![0u8; PACKET_FRAMES * channels * 4];
+    let mut corrected = Vec::new();
+    let mut taken = 0;
     while stdin.read_exact(&mut bytes).is_ok() {
-        let packet = bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
-        let mut queue = lock.lock().expect("sender does not panic");
-        while queue.packets.len() >= limit {
-            queue = wake.wait(queue).expect("sender does not panic");
+        let input: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
+        let packets = match &mut design {
+            None => vec![input],
+            Some(design) => {
+                design.push(&input, &mut corrected);
+                let size = PACKET_FRAMES * design.outputs.len();
+                let mut packets = Vec::new();
+                while corrected.len() - taken >= size {
+                    packets.push(corrected[taken..taken + size].to_vec());
+                    taken += size;
+                }
+                corrected.drain(..taken);
+                taken = 0;
+                packets
+            }
+        };
+        for packet in packets {
+            let mut queue = lock.lock().expect("sender does not panic");
+            while queue.packets.len() >= limit {
+                queue = wake.wait(queue).expect("sender does not panic");
+            }
+            queue.packets.push_back(packet);
         }
-        queue.packets.push_back(packet);
     }
     lock.lock().expect("sender does not panic").closed = true;
+}
+
+#[derive(Clone, Copy)]
+struct Volume {
+    db: f64,
+    muted: bool,
+}
+
+impl Volume {
+    fn gain(self) -> f32 {
+        if self.muted { 0.0 } else { 10f64.powf(self.db / 20.0) as f32 }
+    }
+}
+
+/// Scales `samples` from `from` to `to` across the packet, frame by frame.
+fn ramp(samples: &mut [f32], channels: usize, from: f32, to: f32) {
+    for (n, frame) in samples.chunks_exact_mut(channels).enumerate() {
+        let gain = from + (to - from) * (n + 1) as f32 / PACKET_FRAMES as f32;
+        frame.iter_mut().for_each(|s| *s *= gain);
+    }
+}
+
+/// Serves volume commands, one per line, answering `ok` or `error: …`.
+fn control(listener: &UnixListener, mut volume: Volume, gain: &AtomicU32) {
+    for connection in listener.incoming().flatten() {
+        let Ok(mut writer) = connection.try_clone() else { continue };
+        for line in BufReader::new(connection).lines().map_while(Result::ok) {
+            let reply = match line.split_whitespace().collect::<Vec<_>>()[..] {
+                ["volume", db] => match db.parse::<f64>() {
+                    Ok(db) if db.is_finite() => {
+                        volume.db = db;
+                        Ok(())
+                    }
+                    _ => Err(format!("bad volume {db}")),
+                },
+                ["mute", state @ ("0" | "1")] => {
+                    volume.muted = state == "1";
+                    Ok(())
+                }
+                _ => Err(format!("unknown command {line:?}")),
+            };
+            gain.store(volume.gain().to_bits(), Ordering::Relaxed);
+            let reply = reply.map_or_else(|e| format!("error: {e}\n"), |()| "ok\n".to_string());
+            if writer.write_all(reply.as_bytes()).is_err() {
+                break;
+            }
+        }
+    }
 }
 
 /// Samples of PTP time at `time` on the system clock.
@@ -286,6 +391,14 @@ mod tests {
     }
 
     #[test]
+    fn ramp_reaches_the_new_gain_at_the_end_of_the_packet() {
+        let mut samples = vec![1.0; PACKET_FRAMES * 2];
+        ramp(&mut samples, 2, 1.0, 0.5);
+        assert!((samples[0] - (1.0 - 0.5 / 48.0)).abs() < 1e-6);
+        assert_eq!(samples[PACKET_FRAMES * 2 - 2..], [0.5, 0.5]);
+    }
+
+    #[test]
     fn ptp_time_is_tai() {
         let time = UNIX_EPOCH + Duration::from_millis(1_500);
         assert_eq!(ptp_samples(time), (37 * 1000 + 1_500) * 48);
@@ -298,6 +411,8 @@ mod tests {
             gmid: "00-11-22-FF-FE-33-44-55".to_owned(),
             domain: 3,
             buffer_ms: 100,
+            volume_db: 0.0,
+            control: None,
         };
         let sdp = sdp(
             "atmos67 ch 9-12",

@@ -4,8 +4,6 @@
 
 mod aes67;
 mod decode;
-// Unused until the sender runs it (tasks/dsp.md D4).
-#[allow(dead_code)]
 mod dsp;
 mod iec61937;
 mod layout;
@@ -31,7 +29,8 @@ use openjoc_scene::SpeakerLayout;
 
 const USAGE: &str = "usage: atmos67 (--layout PRESET | --layout-file LAYOUT.json) [--input-channels 2|8] [--input-rate HZ] < capture.s16le > speakers.f32le
        atmos67 (--layout PRESET | --layout-file LAYOUT.json) --aes67-sources > status.json
-       atmos67 (--layout PRESET | --layout-file LAYOUT.json) --aes67-send --ptp-gmid ID [--ptp-domain N] [--aes67-address A.B.C.D] [--aes67-buffer-ms MS] < speakers.f32le";
+       atmos67 (--layout PRESET | --layout-file LAYOUT.json) --aes67-send --ptp-gmid ID [--ptp-domain N] [--aes67-address A.B.C.D] [--aes67-buffer-ms MS]
+           [--dsp SECS_EXPORT_DIR] [--volume DB] [--control SOCKET] < speakers.f32le";
 
 const OUTPUT_RATE: u64 = 48_000;
 
@@ -56,7 +55,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         gmid: String::new(),
         domain: 0,
         buffer_ms: 100,
+        volume_db: 0.0,
+        control: None,
     };
+    let mut dsp = None;
     let mut args = std::env::args().skip(1);
     while let Some(flag) = args.next() {
         let mut value = || args.next().ok_or(USAGE);
@@ -71,6 +73,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             "--aes67-buffer-ms" => send_config.buffer_ms = value()?.parse()?,
             "--ptp-gmid" => send_config.gmid = value()?,
             "--ptp-domain" => send_config.domain = value()?.parse()?,
+            "--dsp" => dsp = Some(std::path::PathBuf::from(value()?)),
+            "--volume" => send_config.volume_db = value()?.parse()?,
+            "--control" => send_config.control = Some(value()?.into()),
             _ => return Err(USAGE.into()),
         }
     }
@@ -97,7 +102,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     if send {
-        return send::run(info.channel_count, &send_config);
+        let design = match dsp {
+            Some(folder) => Some(
+                dsp::design::Design::load(&folder, &info.channel_labels)
+                    .map_err(|e| format!("{}: {e}", folder.display()))?,
+            ),
+            None => None,
+        };
+        if let Some(design) = &design {
+            eprintln!("atmos67: correcting with {} channels out [{}]", design.outputs.len(), design.outputs.join(" "));
+        }
+        return send::run(info.channel_count, &send_config, design);
     }
     eprintln!(
         "atmos67: output {} channels [{}], FLOAT32LE",

@@ -5,6 +5,7 @@
 pub mod biquad;
 pub mod camilla;
 pub mod conv;
+pub mod design;
 #[cfg(test)]
 mod secs_parity;
 

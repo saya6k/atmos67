@@ -56,6 +56,7 @@ impl Config {
     }
 
     /// Channels the pipeline takes in.
+    #[cfg(test)]
     pub fn inputs(&self) -> usize {
         self.capture_channels
     }
