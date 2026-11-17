@@ -30,7 +30,10 @@ use openjoc_scene::SpeakerLayout;
 const USAGE: &str = "usage: atmos67 (--layout PRESET | --layout-file LAYOUT.json) [--input-channels 2|8] [--input-rate HZ] < capture.s16le > speakers.f32le
        atmos67 (--layout PRESET | --layout-file LAYOUT.json) --aes67-sources > status.json
        atmos67 (--layout PRESET | --layout-file LAYOUT.json) --aes67-send --ptp-gmid ID [--ptp-domain N] [--aes67-address A.B.C.D] [--aes67-buffer-ms MS]
-           [--dsp SECS_EXPORT_DIR] [--volume DB] [--control SOCKET] < speakers.f32le";
+           [--dsp SECS_EXPORT_DIR] [--volume DB] [--control SOCKET] < speakers.f32le
+       atmos67 (--layout PRESET | --layout-file LAYOUT.json) --write-design DIR [--base SECS_EXPORT_DIR]
+           [--subs N] [--crossover front|center|surround|back|top=HZ]... [--slope 12|24]
+           [--trim ROLE=DB]... [--delay ROLE=MS]...";
 
 const OUTPUT_RATE: u64 = 48_000;
 
@@ -59,6 +62,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         control: None,
     };
     let mut dsp = None;
+    let mut write_design = None;
+    let mut base = None;
+    let mut manual = dsp::manual::Settings { order: 4, ..Default::default() };
+    // `NAME=NUMBER`, as the --crossover, --trim and --delay flags take.
+    let pair = |text: String| -> Result<(String, f64), Box<dyn Error>> {
+        let (name, number) = text.split_once('=').ok_or(USAGE)?;
+        Ok((name.to_string(), number.parse()?))
+    };
     let mut args = std::env::args().skip(1);
     while let Some(flag) = args.next() {
         let mut value = || args.next().ok_or(USAGE);
@@ -76,6 +87,28 @@ fn main() -> Result<(), Box<dyn Error>> {
             "--dsp" => dsp = Some(std::path::PathBuf::from(value()?)),
             "--volume" => send_config.volume_db = value()?.parse()?,
             "--control" => send_config.control = Some(value()?.into()),
+            "--write-design" => write_design = Some(std::path::PathBuf::from(value()?)),
+            "--base" => base = Some(std::path::PathBuf::from(value()?)),
+            "--subs" => manual.subs = value()?.parse()?,
+            "--slope" => {
+                manual.order = match value()?.as_str() {
+                    "12" => 2,
+                    "24" => 4,
+                    _ => return Err(USAGE.into()),
+                }
+            }
+            "--crossover" => {
+                let (group, hz) = pair(value()?)?;
+                manual.crossover.insert(group, hz);
+            }
+            "--trim" => {
+                let (role, db) = pair(value()?)?;
+                manual.trims.insert(role, db);
+            }
+            "--delay" => {
+                let (role, ms) = pair(value()?)?;
+                manual.delays.insert(role, ms);
+            }
             _ => return Err(USAGE.into()),
         }
     }
@@ -99,6 +132,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut truehd = TrueHd::default();
     if print_sources {
         print!("{}", aes67::status_json(info.channel_count));
+        return Ok(());
+    }
+    if let Some(folder) = write_design {
+        dsp::manual::write(&folder, &info.channel_labels, base.as_deref(), &manual)?;
         return Ok(());
     }
     if send {

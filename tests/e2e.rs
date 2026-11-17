@@ -93,6 +93,22 @@ fn prints_daemon_sources_for_the_layout() {
 }
 
 #[test]
+fn writes_a_bass_managed_design_for_the_layout() {
+    let folder = std::env::temp_dir().join(format!("atmos67-e2e-design-{}", std::process::id()));
+    let output = Command::new(env!("CARGO_BIN_EXE_atmos67"))
+        .args(["--layout", "7.1.4", "--write-design", folder.to_str().unwrap()])
+        .args(["--subs", "2", "--crossover", "front=80", "--slope", "12", "--trim", "SW2=-1.5"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let manifest = std::fs::read_to_string(folder.join("secs-design.json")).unwrap();
+    assert!(manifest.contains("\"SW2\""), "{manifest}");
+    let config = std::fs::read_to_string(folder.join("configs/design.yml")).unwrap();
+    assert!(config.contains("\"order\": 2") && config.contains("trim_SW2"), "{config}");
+    std::fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
 fn eight_channel_capture_decodes_like_stereo() {
     let wide: Vec<u8> = SPDIF
         .chunks(4)
