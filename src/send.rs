@@ -189,10 +189,7 @@ fn read_packets(channels: usize, limit: usize, queue: &(Mutex<Queue>, Condvar)) 
     let mut stdin = io::stdin().lock();
     let mut bytes = vec![0u8; PACKET_FRAMES * channels * 4];
     while stdin.read_exact(&mut bytes).is_ok() {
-        let packet = bytes
-            .chunks_exact(4)
-            .map(|b| f32::from_le_bytes(b.try_into().expect("4 bytes")))
-            .collect();
+        let packet = bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
         let mut queue = lock.lock().expect("sender does not panic");
         while queue.packets.len() >= limit {
             queue = wake.wait(queue).expect("sender does not panic");

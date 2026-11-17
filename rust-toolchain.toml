@@ -1,5 +1,5 @@
 [toolchain]
-# rustc 1.99 runs out of memory compiling the truehd crate; 1.95 is the
-# version truehd itself targets.
-channel = "1.95.0"
+# The SECS 2R crates need Rust 1.99 or later. truehd builds with it only
+# unoptimized (Cargo.toml).
+channel = "1.100.0"
 components = ["clippy"]

@@ -40,7 +40,7 @@
 
 ## Tech Stack
 
-- Rust 1.89+, edition 2024, 단일 바이너리 크레이트
+- Rust 1.99+(`rust-toolchain.toml`은 1.100.0), edition 2024, 단일 바이너리 크레이트
 - `openjoc-api`, `openjoc-scene` (git, 커밋 고정) — E-AC-3 JOC, 배치 파일 파싱
 - `truehd` (crates.io) — TrueHD 디코딩과 OAMD
 - `ffmpeg-next` (crates.io) + 시스템 FFmpeg 라이브러리 — AC-3, E-AC-3, DTS 계열
@@ -119,7 +119,7 @@ pub fn next_burst(&mut self) -> Option<(u8, &[u8])> {
 
 ## Open Questions
 
-1. **라이선스.** `Cargo.toml`에 비어 있다. FFmpeg를 링크하면 배포 시 LGPL(빌드 옵션에 따라 GPL) 조건이 따른다.
+1. ~~**라이선스.**~~ GPL-3.0-only로 정했다(2026-11-17, `LICENSE`). FFmpeg(LGPL)와 SECS 2R 크레이트(AGPL-3.0-only)는 GPLv3와 함께 배포할 수 있다.
 2. **기준 3의 80%.** 두 트랙의 믹스가 같다는 가정이다. 샘플을 돌려 보고 가정이 틀리면 기준을 다시 정한다.
 3. **MAT 2.0 PCM.** 실물 캡처가 없어 감지 로직도 FFmpeg가 만든 스트림으로는 시험할 수 없다. 보드에서 캡처한 파일이 생기면 다시 다룬다.
 4. **48 kHz가 아닌 콘텐츠.** 지금은 무음 처리다. 필요하면 리샘플을 별도 작업으로 추가한다.

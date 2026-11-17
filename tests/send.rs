@@ -70,7 +70,9 @@ fn sends_stdin_as_announced_l24_streams_on_ptp_time() {
         assert!(now.wrapping_sub(packets[0].1) < 5 * 48_000);
         let received: Vec<u8> = packets.iter().flat_map(|p| p.2.clone()).collect();
         let expected: Vec<u8> = input
-            .chunks_exact(CHANNELS)
+            .as_chunks::<CHANNELS>()
+            .0
+            .iter()
             .flat_map(|frame| frame[channels.clone()].to_vec())
             .flat_map(|s| ((s * 8_388_607.0).round() as i32).to_be_bytes()[1..].to_vec())
             .collect();

@@ -19,7 +19,7 @@ Vero V의 atmos67이 Nuprime H16-A 시리즈의 처리 기능 중 다음을 대�
 |---|---|
 | 보정 엔진 | SECS 2R 공개 크레이트(crates.io, AGPL-3.0-only)를 링크한다 |
 | 라이선스 | atmos67은 GPL-3.0. 배포하는 바이너리의 SECS 부분에는 AGPL 조건이 적용된다는 사실을 README에 적는다 |
-| 보정 적용 | CamillaDSP를 쓰지 않고 atmos67이 SECS의 `SignalChain`과 `MimoPaths`를 직접 처리한다 |
+| 보정 적용 | CamillaDSP를 쓰지 않는다. atmos67이 SECS의 CamillaDSP 내보내기(yml + FIR WAV) 중 SECS가 쓰는 부분만 해석해 처리한다 |
 | 볼륨 | Kodi 애드온이 볼륨 변경을 받아 atmos67에 전달한다 |
 | AES67 | 8채널 단위 스트림을 유지하고, 출력 채널이 서브우퍼만큼 늘어난다 |
 
@@ -38,6 +38,13 @@ Kodi ─> 루프백 ─> arecord ─> atmos67 (디코딩·렌더) ─> atmos67 -
   - 볼륨과 음소거
   - 체인 다시 읽기: 파일을 세대 폴더로 바꾸고 진입점 하나만 교체한다(SECS ADR 0018과 같은 방식)
   - 측정 모드 진입과 해제: 일반 재생을 멈추고 DSP를 거치지 않으며, 지정한 출력 하나로 시험 신호를 보낸다
+- **보정 형식.** SECS 공개 API는 `SignalChain`을 내주지 않는다. 대신 공개 API로 받는 CamillaDSP 내보내기가 DSP 전체를 기술하므로 이것을 atmos67의 보정 형식으로 쓴다(2026-11-17, SECS 0.25.2의 `secs-camilla`에서 확인).
+  - `Biquad`: Peaking, Allpass
+  - `BiquadCombo`: LinkwitzRiley와 Butterworth 하이패스·로우패스(차수 지정)
+  - `Conv`: Wav
+  - `Delay`(샘플 단위), `Gain`, `Mixer`, 파이프라인
+
+  이 밖의 요소가 나오면 거부하고 알린다.
 - 보정 모드는 세 가지다.
   - 끔: DSP를 통과시킨다
   - 수동: Kodi 설정으로 만든, FIR 없는 체인을 쓴다
@@ -55,7 +62,7 @@ Kodi ─> 루프백 ─> arecord ─> atmos67 (디코딩·렌더) ─> atmos67 -
 
 ## 성공 기준
 
-1. **체인 일치.** SECS가 CamillaDSP로 내보낸 같은 설계를 CamillaDSP가 처리한 임펄스 응답과 atmos67의 임펄스 응답이 출력마다 −60 dB 이내로 같다. 기준 응답은 `linux-test`에서 한 번 만들어 픽스처로 커밋한다. CamillaDSP는 실행 의존성이 아니다.
+1. **체인 일치.** 같은 설계에 대해, atmos67이 CamillaDSP 내보내기를 처리해 얻은 경로별 임펄스 응답이 SECS의 `Convolution` 내보내기(입력→출력 경로마다 완성된 임펄스 응답)와 −60 dB 이내로 같다. 설계는 SECS의 시뮬레이션 방(`SimRoom`)으로 시험 중에 만든다.
 2. **베이스 매니지먼트.** 수동 체인에서 7.1.4와 서브우퍼 2개 구성일 때 크로스오버 아래 대역이 서브로, 위 대역이 메인으로 가고, 합이 평탄하다(±0.5 dB).
 3. **측정 경로.** 알려진 임펄스 응답으로 만든 가짜 마이크로 `calibrate`를 돌리면 SECS가 그 방을 그대로 측정한다. 지연은 1샘플 이내, 레벨은 0.2 dB 이내여야 한다.
 4. **볼륨.** 볼륨 변경이 다음 패킷부터 적용되고 끊김이 없다(램프 처리).
@@ -66,13 +73,13 @@ Kodi ─> 루프백 ─> arecord ─> atmos67 (디코딩·렌더) ─> atmos67 -
 
 각 작업은 실패하는 시험 → 구현 → 전체 시험 → 커밋 순서로 끝낸다.
 
-- [ ] **D0. Vero V 패키징 커밋.** 지금 커밋하지 않은 작업을 먼저 커밋한다. `SPEC.md`의 가정 5(베이스 매니지먼트는 외부의 일)와 Tech Stack을 이 문서에 맞게 고친다.
-- [ ] **D1. 툴체인과 의존성.** Rust를 1.100으로 올리고 SECS 크레이트를 추가한다. `Cargo.toml`에 `license = "GPL-3.0-only"`와 `LICENSE`를 둔다. **armhf 교차 빌드가 되는지 가장 먼저 확인한다**(faer, rayon).
+- [x] **D0. Vero V 패키징 커밋.** 지금 커밋하지 않은 작업을 먼저 커밋한다. `SPEC.md`의 가정 5(베이스 매니지먼트는 외부의 일)와 Tech Stack을 이 문서에 맞게 고친다.
+- [x] **D1. 툴체인과 의존성.** (2026-11-18: SECS 0.25.2가 armhf로 빌드되는 것을 확인했다. 쓰이지 않는 의존성 경고를 피하려고 `secs`는 D7에서 다시 넣는다. truehd는 Rust 1.100에서 0.7.2를 병렬 빌드하면 VM 8G를 넘어 0.7.3으로 올렸다.) Rust를 1.100으로 올리고 SECS 크레이트를 추가한다. `Cargo.toml`에 `license = "GPL-3.0-only"`와 `LICENSE`를 둔다. **armhf 교차 빌드가 되는지 가장 먼저 확인한다**(faer, rayon).
   - Verify: armhf로 `cargo test`, clippy
-- [ ] **D2. DSP 기본 요소** (`src/dsp/`): 바이쿼드(PEQ, LR/BW 하이패스와 로우패스, 올패스), 지연선, 균일 분할 FFT 컨볼버. 계수 설계는 SECS 크레이트의 함수를 쓰고, atmos67은 실행만 맡는다.
+- [ ] **D2. DSP 기본 요소** (`src/dsp/`): 바이쿼드(Peaking, Allpass, BiquadCombo의 LR/BW 하이패스·로우패스), 지연선, 균일 분할 FFT 컨볼버. 계수는 CamillaDSP와 같은 식(RBJ 쿡북, 버터워스 극 배치)으로 만든다.
   - Verify: 단위 시험(주파수 응답, 긴 FIR을 직접 컨볼루션한 결과와 비교)
-- [ ] **D3. 체인 처리기.** `SignalChain`과 `MimoPaths`를 블록 단위로 처리한다. 처리 순서는 입력 하이패스, 입력 PEQ와 FIR, 베이스 매니지먼트, 서브 버스, 서브별 분기, 메인 출력, MIMO 경로다.
-  - Verify: 성공 기준 1(CamillaDSP 기준 픽스처)
+- [ ] **D3. 설정 해석과 처리기.** SECS의 CamillaDSP yml(위 부분집합)과 FIR WAV를 읽어 파이프라인(필터, 믹서)을 블록 단위로 처리한다.
+  - Verify: 성공 기준 1(SECS `Convolution` 내보내기와 비교)
 - [ ] **D4. 송출기 통합.** 역할 대응, 출력 채널에 서브우퍼 추가, `--dsp <체인>`, 볼륨, 제어 소켓.
   - Verify: 성공 기준 4와 6, `tests/send.rs` 확장
 - [ ] **D5. 수동 체인.** 설정(그룹별 크로스오버와 기울기, 서브우퍼 수, 스피커별 레벨과 거리)으로 FIR 없는 체인을 만든다. 자동 체인 위에 같은 값을 덧씌울 수도 있다.
@@ -94,7 +101,7 @@ Kodi ─> 루프백 ─> arecord ─> atmos67 (디코딩·렌더) ─> atmos67 -
 
 - D1에서 SECS 크레이트가 armhf로 빌드되지 않을 때. 64비트 userland나 측정만 다른 기기에서 하는 방법 등 대안을 들고 묻는다
 - 성공 기준 1을 맞출 수 없을 때(SECS 체인의 의미가 CamillaDSP 출력과 다를 때)
-- SECS 크레이트와 `realfft` 외에 새 의존성이 필요할 때
+- SECS 크레이트와 `realfft`, yml 파서(`serde_yaml` 계열) 외에 새 의존성이 필요할 때
 
 ## 확인하지 못한 것 (실기 필요)
 

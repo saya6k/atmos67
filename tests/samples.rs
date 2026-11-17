@@ -51,7 +51,7 @@ fn atmos67(args: &[&str], input: Vec<u8>) -> (Vec<f32>, String) {
 }
 
 fn floats(bytes: &[u8]) -> Vec<f32> {
-    bytes.chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().unwrap())).collect()
+    bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect()
 }
 
 fn db(x: f64) -> f64 {

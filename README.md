@@ -27,7 +27,7 @@ arecord ─> atmos67 ─> CamillaDSP ─> RAVENNA ALSA 장치 ─> AES67 (RTP)
 
 ## 빌드
 
-Rust 1.95(`rust-toolchain.toml`로 고정)와 FFmpeg 개발 라이브러리, clang이 필요합니다.
+Rust 1.100(`rust-toolchain.toml`로 고정)와 FFmpeg 개발 라이브러리, clang이 필요합니다.
 
 ```sh
 apk add ffmpeg-dev clang-dev pkgconf musl-dev   # Alpine (FFmpeg 8.0에서 확인)
@@ -166,7 +166,7 @@ sudo apt install ./atmos67_0.1.0_armhf.deb     # Vero V에서. alsa-utils, linux
 - **PTP와 시스템 시각.** 기본 설정은 네트워크에서 가장 좋은 클록이 그랜드마스터가 됩니다. 다른 장비가 그랜드마스터가 되면 Vero V의 시스템 시각이 그 장비를 따라가므로, 그 장비가 실제 시각을 주지 않으면(Dante 장비 등) 시스템 시각이 틀어지고 NTP와도 충돌합니다. Vero V의 시각을 지키려면 `/etc/atmos67/ptp4l.conf`의 `priority1`을 낮춰 Vero V를 그랜드마스터로 만듭니다.
 - **영상과의 동기.** Kodi는 루프백 뒤의 지연(디코딩, 버퍼 기본 100 ms, 수신기)을 모릅니다. Kodi의 오디오 오프셋으로 맞춥니다.
 - **룸 보정.** 이 패키지는 CamillaDSP를 포함하지 않습니다.
-- **라이선스.** 바이너리에 FFmpeg(LGPL)가 정적으로 들어 있습니다. 배포한다면 그 조건을 따라야 합니다.
+- **라이선스.** atmos67은 GPL-3.0-only입니다(`LICENSE`). 바이너리에 FFmpeg(LGPL)가 정적으로 들어 있어, 배포할 때는 그 조건도 따라야 합니다.
 
 ### 확인한 것과 확인하지 못한 것
 

@@ -632,9 +632,9 @@ dependencies = [
 
 [[package]]
 name = "truehd"
-version = "0.7.2"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3670e5f6df01d8518e225c37ada5c9e41fa5d98fb414ef1eed051e71c885da16"
+checksum = "137c6d4150e5bc52bd9baf6d68ea05d3095079d5a0c61eae9702ea311e2462a4"
 dependencies = [
  "anyhow",
  "bitstream-io",

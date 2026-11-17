@@ -60,8 +60,8 @@ impl Depacketizer {
                 return None;
             }
             self.payload.clear();
-            for word in rest[HEADER_BYTES..HEADER_BYTES + padded].chunks_exact(2) {
-                self.payload.extend_from_slice(&[word[1], word[0]]);
+            for [high, low] in rest[HEADER_BYTES..HEADER_BYTES + padded].as_chunks::<2>().0 {
+                self.payload.extend_from_slice(&[*low, *high]);
             }
             self.payload.truncate(len);
             self.pos += HEADER_BYTES + padded;
