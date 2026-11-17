@@ -3,7 +3,10 @@
 //! 48 kHz samples, one channel at a time.
 
 pub mod biquad;
+pub mod camilla;
 pub mod conv;
+#[cfg(test)]
+mod secs_parity;
 
 use std::collections::VecDeque;
 

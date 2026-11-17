@@ -13,6 +13,12 @@ openjoc-api = { git = "https://github.com/chyinan/OpenJOC", rev = "893425751b780
 openjoc-scene = { git = "https://github.com/chyinan/OpenJOC", rev = "893425751b7800632e8826d05bdef649e01faea6" }
 truehd = "0.7.3"
 realfft = "3.5"
+serde_json = "1"
+
+[dev-dependencies]
+# AGPL-3.0-only, for the parity test of src/dsp/secs_parity.rs; atmos67 is
+# GPL-3.0-only and conveys the combination under GPLv3 section 13.
+secs = { package = "sound-equalization-and-correction-system-rust-api", version = "=0.25.2" }
 
 # rustc needs more than 10 GB of memory to optimize truehd, at any level.
 [profile.release.package.truehd]

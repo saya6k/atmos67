@@ -78,7 +78,7 @@ Kodi ─> 루프백 ─> arecord ─> atmos67 (디코딩·렌더) ─> atmos67 -
   - Verify: armhf로 `cargo test`, clippy
 - [x] **D2. DSP 기본 요소** (`src/dsp/`): 바이쿼드(Peaking, Allpass, BiquadCombo의 LR/BW 하이패스·로우패스), 지연선, 균일 분할 FFT 컨볼버. 계수는 CamillaDSP와 같은 식(RBJ 쿡북, 버터워스 극 배치)으로 만든다.
   - Verify: 단위 시험(주파수 응답, 긴 FIR을 직접 컨볼루션한 결과와 비교)
-- [ ] **D3. 설정 해석과 처리기.** SECS의 CamillaDSP yml(위 부분집합)과 FIR WAV를 읽어 파이프라인(필터, 믹서)을 블록 단위로 처리한다.
+- [x] **D3. 설정 해석과 처리기.** (2026-11-18: SECS 시험용 7.1.4 방(서브 3개, 저지연 모드, 헤드룸 −10 dB)의 37개 경로가 최대 상대 오차 3.0e-6으로 일치했다. 처음부터 두 번 돌려 같은 결과를 얻었다. 그 전의 첫 실행은 R→R에서 어긋났는데, 내보낸 파일이 컨테이너와 함께 사라져 원인을 확인하지 못했다. 지금은 결과를 `target/secs-parity`에 남긴다.) SECS의 CamillaDSP yml(위 부분집합)과 FIR WAV를 읽어 파이프라인(필터, 믹서)을 블록 단위로 처리한다.
   - Verify: 성공 기준 1(SECS `Convolution` 내보내기와 비교)
 - [ ] **D4. 송출기 통합.** 역할 대응, 출력 채널에 서브우퍼 추가, `--dsp <체인>`, 볼륨, 제어 소켓.
   - Verify: 성공 기준 4와 6, `tests/send.rs` 확장
