@@ -44,8 +44,8 @@ const USAGE: &str = "usage: atmos67 (--layout PRESET | --layout-file LAYOUT.json
        atmos67 calibrate finish --project DIR --control SOCKET --mic ALSA_DEVICE --out DIR
        atmos67 calibrate latency --control SOCKET --mic ALSA_DEVICE [--channel N]
        atmos67 dante list [--seconds N]
-       atmos67 dante aes67 --device NAME [--off]
-       atmos67 dante connect --device NAME --stream STREAM --control SOCKET [--first-channel N]";
+       atmos67 dante aes67 --device NAME [--ipv4 IP --port N] [--off]
+       atmos67 dante connect --device NAME [--ipv4 IP --port N --protocol V] --stream STREAM --control SOCKET [--first-channel N]";
 
 const OUTPUT_RATE: u64 = 48_000;
 
@@ -380,6 +380,8 @@ fn calibration(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn Err
 fn dante_command(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn Error>> {
     let step = args.next().ok_or(USAGE)?;
     let (mut device, mut stream, mut control, mut first, mut seconds, mut on) = (None, None, None, 1u16, 3u64, true);
+    // Where `list` found the device, so it need not be looked for again.
+    let (mut ipv4, mut port, mut protocol) = (None, None, None);
     while let Some(flag) = args.next() {
         let mut value = || args.next().ok_or(USAGE);
         match flag.as_str() {
@@ -388,11 +390,21 @@ fn dante_command(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn E
             "--control" => control = Some(std::path::PathBuf::from(value()?)),
             "--first-channel" => first = value()?.parse()?,
             "--seconds" => seconds = value()?.parse()?,
+            "--ipv4" => ipv4 = Some(value()?.parse()?),
+            "--port" => port = Some(value()?.parse()?),
+            "--protocol" => protocol = Some(value()?),
             "--off" => on = false,
             _ => return Err(USAGE.into()),
         }
     }
     let wait = std::time::Duration::from_secs(seconds);
+    let find = |device: Option<String>| -> Result<dante::Device, Box<dyn Error>> {
+        let device = device.ok_or(USAGE)?;
+        Ok(match (ipv4, port) {
+            (Some(ipv4), Some(port)) => dante::Device { name: device, ipv4, port, protocol_version: protocol.clone() },
+            _ => dante::find(&device, wait)?,
+        })
+    };
     match step.as_str() {
         "list" => {
             for found in dante::discover(wait)? {
@@ -404,13 +416,13 @@ fn dante_command(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn E
             }
         }
         "aes67" => {
-            let found = dante::find(&device.ok_or(USAGE)?, wait)?;
+            let found = find(device)?;
             dante::set_aes67(&found, on)?;
             println!("{}", serde_json::json!({ "device": found.name, "aes67": on, "note": "takes effect after the device reboots" }));
         }
         "connect" => {
             let flow = dante::flow(&control.ok_or(USAGE)?, &stream.clone().ok_or(USAGE)?)?;
-            let found = dante::find(&device.ok_or(USAGE)?, wait)?;
+            let found = find(device)?;
             dante::subscribe(&found, &flow, first)?;
             println!(
                 "{}",

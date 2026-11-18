@@ -445,8 +445,8 @@ msgid "%s goes to %s, channels %d to %d."
 msgstr "%s 스트림을 %s의 %d~%d번 채널로 받게 했습니다."
 
 msgctxt "#32166"
-msgid "The Dante device did not take it:"
-msgstr "Dante 장비가 받아들이지 않았습니다:"
+msgid "The Dante step failed:"
+msgstr "Dante 작업이 실패했습니다:"
 
 msgctxt "#32167"
 msgid "Subscribe to a stream"

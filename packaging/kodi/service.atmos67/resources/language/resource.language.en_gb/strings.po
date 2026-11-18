@@ -445,7 +445,7 @@ msgid "%s goes to %s, channels %d to %d."
 msgstr ""
 
 msgctxt "#32166"
-msgid "The Dante device did not take it:"
+msgid "The Dante step failed:"
 msgstr ""
 
 msgctxt "#32167"

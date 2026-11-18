@@ -31,6 +31,12 @@ def dante(args):
     return [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
 
 
+def where(device):
+    """The flags naming where `list` found the device, so it is not looked for again."""
+    flags = ["--device", device["name"], "--ipv4", device["ipv4"], "--port", str(device["port"])]
+    return flags + (["--protocol", device["protocol"]] if device.get("protocol") else [])
+
+
 def connect(device):
     try:
         streams = common.answer_json(common.command("status"))["streams"]
@@ -45,7 +51,7 @@ def connect(device):
     first = xbmcgui.Dialog().numeric(0, text(32164), "1")
     if not first or int(first) < 1:
         return
-    done = dante(["connect", "--device", device["name"], "--stream", stream["name"],
+    done = dante(["connect"] + where(device) + ["--stream", stream["name"],
                   "--control", common.CONTROL, "--first-channel", first])
     if done is not None:
         last = int(first) + len(stream["channels"]) - 1
@@ -71,7 +77,7 @@ def manage():
         connect(device)
     elif action in (1, 2):
         flag = [] if action == 1 else ["--off"]
-        if dante(["aes67", "--device", device["name"]] + flag) is not None:
+        if dante(["aes67"] + where(device) + flag) is not None:
             xbmcgui.Dialog().ok(text(32160), text(32170))
 
 

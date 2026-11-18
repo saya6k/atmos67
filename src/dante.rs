@@ -13,7 +13,6 @@
 
 use std::collections::BTreeMap;
 use std::error::Error;
-use std::io::{BufRead, BufReader, Write};
 use std::net::{IpAddr, Ipv4Addr};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
@@ -150,6 +149,9 @@ pub fn plan_request(flow: &Flow, protocol_id: u16, first_channel: u16) -> Value 
 
 /// The command that subscribes `flow`, checked by netaudio before it is sent.
 fn command(flow: &Flow, protocol_id: u16, first_channel: u16) -> Result<String> {
+    if first_channel.checked_add(flow.channels.saturating_sub(1)).is_none() {
+        return Err(format!("{} channels from receiver channel {first_channel} on run past 65535", flow.channels).into());
+    }
     let request: ExternalSubscriptionPlanRequest = serde_json::from_value(plan_request(flow, protocol_id, first_channel))?;
     let command = plan_external_subscription(request).map_err(|e| format!("{e:?}"))?;
     Ok(serde_json::to_string(&command)?)
@@ -169,10 +171,7 @@ pub fn flow(control: &Path, name: &str) -> Result<Flow> {
     let mut socket = UnixStream::connect(control).map_err(|e| format!("sender control {}: {e}", control.display()))?;
     socket.set_read_timeout(Some(Duration::from_secs(5)))?;
     socket.set_write_timeout(Some(Duration::from_secs(5)))?;
-    socket.write_all(b"status\n")?;
-    let mut answer = String::new();
-    BufReader::new(&socket).read_line(&mut answer)?;
-    let status: Value = serde_json::from_str(answer.trim_end().strip_prefix("ok ").ok_or_else(|| format!("sender: {answer}"))?)?;
+    let status: Value = serde_json::from_str(&crate::latency::ask(&mut socket, b"status\n")?)?;
     let streams = status["streams"].as_array().ok_or("the sender reports no streams")?;
     let stream = streams.iter().find(|s| s["name"] == name).ok_or_else(|| {
         let names: Vec<&str> = streams.iter().filter_map(|s| s["name"].as_str()).collect();
@@ -211,6 +210,11 @@ mod tests {
         assert_eq!(command["receiver_channel_ids"], json!([9, 10, 11, 12]));
         assert_eq!(command["flow_slot_assignments"], json!([1, 2, 3, 4]));
         assert_eq!(command["primary_destination"], json!({ "address": "239.69.67.1", "port": 5004 }));
+    }
+
+    #[test]
+    fn refuses_receiver_channels_past_65535() {
+        assert!(command(&flow(), 0x2809, 65533).is_err());
     }
 
     #[test]

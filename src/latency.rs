@@ -78,7 +78,7 @@ fn now() -> f64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs_f64()
 }
 
-fn ask(socket: &mut UnixStream, message: &[u8]) -> Result<String> {
+pub(crate) fn ask(socket: &mut UnixStream, message: &[u8]) -> Result<String> {
     socket.write_all(message)?;
     let mut answer = String::new();
     BufReader::new(socket).read_line(&mut answer)?;
