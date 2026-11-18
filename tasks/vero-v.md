@@ -67,6 +67,12 @@ container machine run --root -n linux-test -- sh /Users/saya6k/Projects/aes67/ta
 - 바이너리는 glibc 2.30 이하 심볼만 쓰고 libc 계열 외 공유 라이브러리가 없다.
 - `.deb` 설치, `hdmi_atmos67:AES0=…` 형식의 이름 해석, `ptp4l` 설정, 그랜드마스터 읽기, 초당 1000패킷 송출과 SDP.
 
+2026-11-19 (리뷰 수정 뒤, `tasks/review.md`), arm64 네이티브로:
+
+- 단위 71, `tests/e2e.rs` 12, `tests/send.rs` 5, `tests/samples.rs` 12(`--ignored`), 애드온 파이썬 15개 통과. clippy 경고 없음.
+- `tests/calibrate.rs`는 멀티캐스트를 루프백에 둔 컨테이너에서 통과했다(README "시험"). 컨테이너 네트워크로 내보내면 VM 쪽에서 송출이 멈춰 측정이 거부된다.
+- armv7로는 이 수정 뒤에 돌리지 않았다. 패키지를 만들기 전에 `target/pkg.sh`로 다시 확인한다.
+
 ## 남은 일
 
 실기가 있어야 하는 것부터.
@@ -82,6 +88,10 @@ container machine run --root -n linux-test -- sh /Users/saya6k/Projects/aes67/ta
    journalctl -u atmos67 -u atmos67-ptp4l -b
    ```
    커널이 4.9.269-93이 아니면 `snd-aloop`과 모듈 서명 설정을 다시 확인한다.
+
+   `ethtool -T eth0`으로 PTP 하드웨어 타임스탬프를 확인한다(2026-11-19, 실기가 없어 아직 모른다). `hardware-transmit`·`hardware-receive`가 있고 `PTP Hardware Clock`이 번호면 지원한다. 그러면 `atmos67-ptp4l`이 `ptp4l -H`로, `atmos67-phc2sys`가 `phc2sys -a -rr`로 돌아야 한다(`systemctl status`의 명령줄). `software-*`만 있고 `PTP Hardware Clock: none`이면 `ptp4l -S`다. 근거: 커널에 `CONFIG_PTP_1588_CLOCK=y`, `CONFIG_STMMAC_ETH=y`가 있고, S905X4의 Synopsys 이더넷 MAC은 보통 IEEE 1588 타임스탬프를 갖는다(일반 지식, 이 칩에서 확인하지 않음). 정밀도는 보통 하드웨어 1 µs 안쪽, 소프트웨어 수십 µs이며 수신기가 잠기는지가 실제 기준이다.
+
+   송출기 로그에서 `the timeline was N ms off the clock`(루프가 100 ms 넘게 밀림)과 `input ran N ms ahead`(입력이 버퍼보다 앞서 버림)가 얼마나 나오는지도 본다. 앞의 것이 측정 중에 나면 그 측정은 거부된다.
 2. **Kodi.** 애드온 설치 → 장치 목록에 `atmos67 (AES67)`이 보이는지 → "Kodi 오디오 출력을 atmos67로 설정"이 통하는지 → 포맷별 재생 중 `cat /proc/asound/Loopback/pcm0p/sub0/hw_params`와 `journalctl -u atmos67 -f`. 장치가 안 보이거나 HD 포맷 패스스루가 안 되면 OSMC의 ALSA 싱크 패치를 살펴야 한다.
 3. **성능.** 가장 큰 위험이다. 실기에서 `atmos67`에 파일을 넣어 실시간 대비 속도를 잰다(README "성능"의 방식, `target/bench.sh` 참고). TrueHD는 `truehd` 크레이트를 최적화 없이 빌드한 상태다. 모자라면: 메모리 넉넉한 머신에서 `truehd`를 최적화해 빌드, 또는 64비트 userland 여부 재확인.
 4. **포맷 전환.** 캡처 재시작이 실제로 되는지, `arecord`가 깔끔히 끝나는지.

@@ -21,7 +21,7 @@ arecord ─> atmos67 ─> CamillaDSP ─> RAVENNA ALSA 장치 ─> AES67 (RTP)
 | MAT 2.0 PCM (Apple TV 등의 Atmos), LPCM | 미지원. 무음을 냅니다. | |
 | 48 kHz가 아닌 콘텐츠 | 미지원. 무음을 냅니다. | |
 
-채널 베드는 채널마다 같은 이름의 스피커로, 없으면 표준 위치에서 5° 이내의 스피커로, 그것도 없으면 주변 스피커로 패닝(VBAP)해 보냅니다. LFE는 `lfe` 역할 스피커로만 가고, 없으면 버립니다.
+채널 베드는 채널마다 같은 이름의 스피커로, 없으면 표준 위치에서 5° 이내의 스피커로, 그것도 없으면 주변 스피커로 패닝(VBAP)해 보냅니다. LFE는 `lfe` 역할 스피커로만 가고(여럿이면 N대가 1/N씩 나눠 합이 하나와 같습니다), 없으면 버립니다.
 
 실제 HDMI 입력과 AES67 송출은 실기에서 확인하지 않았습니다. 아래 "시험"의 결과는 모두 파일을 FFmpeg로 IEC 61937에 담아 넣은 것입니다.
 
@@ -156,9 +156,9 @@ sudo apt install ./atmos67_0.1.0_armhf.deb     # Vero V에서. alsa-utils, linux
 
 1. 설정 → 애드온 → zip 파일에서 설치로 `service.atmos67-0.1.0.zip`을 설치합니다.
 2. 애드온 설정에서 스피커 배치 프리셋, 네트워크 인터페이스, 멀티캐스트 주소, PTP 도메인을 고릅니다. 바꾸면 서비스가 다시 시작됩니다. 실제 위치와 거리는 측정 보정이 맞추므로 배치 파일은 애드온에서 고르지 않습니다(설정 파일의 `LAYOUT_FILE`로는 쓸 수 있습니다).
-   - "스트림 구성"에서 어느 스피커를 어느 스트림(이름, 멀티캐스트 주소, 최대 8채널)에 넣을지 정합니다. 수신기마다 필요한 채널만 받게 할 수 있고, 스트림 이름이 수신기(예: Dante Controller)에 보이는 이름입니다. 정하지 않으면 순서대로 8채널씩 보냅니다.
+   - "스트림 구성"에서 어느 스피커를 어느 스트림(이름, 멀티캐스트 주소, 최대 8채널)에 넣을지 정합니다. 수신기마다 필요한 채널만 받게 할 수 있고, 스트림 이름이 수신기(예: Dante Controller)에 보이는 이름입니다. 정하지 않으면 순서대로 8채널씩 보냅니다. 고르는 목록은 지금 보정 모드에서 실제로 보내는 채널입니다. "끔"이면 렌더한 스피커(LFE 포함), 그 밖에는 보정 설계의 출력(메인과 `SW1`…)입니다. 모드를 바꾸면 없는 채널 이름은 송출기가 알리고 건너뜁니다.
    - "상태 보기"는 서비스, 보정 모드, PTP 그랜드마스터, 재생 여부, 볼륨, 지연, 송출 오류, 스트림 구성을 보여 줍니다.
-   - "Dante 수신기 연결"은 네트워크의 Dante 장비를 찾아 AES67 모드를 켜거나 끄고(장비 재부팅 후 적용), 스트림을 수신기의 N번 채널부터 차례로 구독시킵니다. Dante Controller에서 하는 일과 같으며, 명령줄로는 `atmos67 dante list | aes67 | connect`입니다. Dante의 제어 프로토콜은 비공개라 [netaudio](https://github.com/chris-ritsen/network-audio-controller)의 역분석 구현(`netaudio-core`, Unlicense)을 씁니다. **Dante 장비에서는 아직 시험하지 못했습니다.** 동작하지 않으면 Dante Controller로 같은 이름의 스트림을 구독하면 됩니다. Dante 장비는 구독을 저장해 두므로 한 번이면 됩니다. 다만 스트림 구성을 바꾸거나 Vero의 IP 주소가 바뀌면 다시 구독해야 합니다.
+   - "Dante 수신기 연결"은 네트워크의 Dante 장비를 찾아 AES67 모드를 켜거나 끄고(장비 재부팅 후 적용), 스트림을 수신기의 N번 채널부터 차례로 구독시킵니다. Dante Controller에서 하는 일과 같으며, 명령줄로는 `atmos67 dante list | aes67 | connect`입니다. Dante의 제어 프로토콜은 비공개라 [netaudio](https://github.com/chris-ritsen/network-audio-controller)의 역분석 구현(`netaudio-core`, Unlicense)을 씁니다. **Dante 장비에서는 아직 시험하지 못했습니다.** 동작하지 않으면 Dante Controller로 같은 이름의 스트림을 구독하면 됩니다. Dante 장비는 구독을 저장해 두므로 한 번이면 됩니다. 다만 스트림 구성을 바꾸거나 Vero의 IP 주소가 바뀌면 다시 구독해야 합니다. AES67 모드를 바꾼 뒤에는 설정을 다시 읽어 확인하는데, 장비가 설정을 알려 주지 않으면 실패 대신 `"confirmed": false`를 냅니다(명령은 보냈습니다).
 3. 애드온 설정의 "Kodi 오디오 출력을 atmos67로 설정"을 실행합니다. 오디오 출력과 패스스루 장치를 `atmos67 (AES67)`로 바꾸고, 스피커 수를 2.0으로, 모든 포맷의 패스스루와 Dolby Digital 트랜스코딩을 켭니다. Kodi를 다시 시작해야 장치가 목록에 나타날 수 있습니다.
 
 애드온 없이 쓰려면 `/etc/atmos67/atmos67.conf`를 고치고 `sudo systemctl restart atmos67`을 합니다.
@@ -182,12 +182,15 @@ sudo apt install ./atmos67_0.1.0_armhf.deb     # Vero V에서. alsa-utils, linux
   atmos67 calibrate finish --project DIR --control /run/atmos67/control --mic plughw:1,0 --out DESIGN_DIR
   ```
 
-- **볼륨**: 패스스루 중에는 Kodi가 소리를 줄이지 않으므로, 애드온이 Kodi의 볼륨 변경을 송출기에 보냅니다. 100 %가 "최대 볼륨"이고 그 아래 60 dB를 씁니다.
+- **볼륨**: 패스스루 중에는 Kodi가 소리를 줄이지 않으므로, 애드온이 Kodi의 볼륨 변경을 송출기에 보냅니다. 100 %가 "최대 볼륨"이고 그 아래 60 dB를 씁니다. 바뀐 볼륨은 설정 파일에도 적어 두므로, 서비스가 스스로 다시 시작해도(그랜드마스터 변경 등) 그 볼륨으로 켜집니다.
+- **레벨·거리가 지금 설계에 없는 출력이면** (서브 수나 배치를 바꾼 뒤 남은 `SW2`, `Lb` 등) 그 항목만 알리고 빼며, 나머지 보정은 그대로 적용합니다.
+- **측정이 끊기면 다시 잽니다.** 측정 신호를 보내는 동안 송출기가 100 ms 넘게 밀리면 신호에 빈틈이 생기므로, 송출기가 그 측정을 거부하고(`the sender fell behind the clock while playing; play again`) 보정 단계가 실패합니다. 그 위치를 다시 측정합니다.
 - 명령줄에서는 `--write-design`(수동 설계 만들기), 송출기의 `--dsp`, `--volume`, `--control`, 보정만 돌리는 `--dsp-only`가 있습니다(`atmos67`을 인자 없이 실행하면 사용법이 나옵니다).
 
 ### 알아 둘 것
 
 - **PCM은 무음입니다.** Kodi가 패스스루하지 않고 직접 디코딩한 소리(스테레오 음악, 메뉴 효과음)는 나지 않습니다. 멀티채널은 위 설정에서 Kodi가 Dolby Digital로 트랜스코딩해 보내므로 납니다.
+- **PTP 하드웨어 타임스탬프.** Vero V가 지원하는지는 확인하지 못했습니다. 커널(4.9.269-93-osmc)에 `CONFIG_PTP_1588_CLOCK=y`와 이더넷 드라이버 `CONFIG_STMMAC_ETH=y`가 있고, S905X4의 Synopsys 이더넷 MAC은 보통 IEEE 1588 타임스탬프를 갖지만, OSMC 드라이버가 켜 두었는지는 실기에서 봐야 합니다. `ethtool -T eth0`에 `hardware-transmit`·`hardware-receive`와 `PTP Hardware Clock: 0` 같은 번호가 있으면 지원하고, `software-*`만 있고 `PTP Hardware Clock: none`이면 지원하지 않습니다. 어느 쪽이든 `atmos67-ptp4l` 서비스가 시작할 때 이것을 보고 고릅니다: 있으면 `ptp4l -H`로 랜카드 클록을 맞추고 `phc2sys -a -rr`가 시스템 클록으로 옮기며(Vero가 그랜드마스터면 반대로), 없으면 `ptp4l -S`가 시스템 클록을 직접 맞춥니다. 송출기는 늘 시스템 클록을 읽으므로 동작은 같고 정밀도만 다릅니다. 보통 하드웨어는 1 µs 안쪽, 소프트웨어는 수십 µs 정도이고 네트워크와 부하에 따라 달라집니다. 수신기가 소프트웨어 정밀도로 잠기는지는 수신기마다 확인해야 합니다.
 - **PTP와 시스템 시각.** 기본 설정은 네트워크에서 가장 좋은 클록이 그랜드마스터가 됩니다. 다른 장비가 그랜드마스터가 되면 Vero V의 시스템 시각이 그 장비를 따라가므로, 그 장비가 실제 시각을 주지 않으면(Dante 장비 등) 시스템 시각이 틀어지고 NTP와도 충돌합니다. Vero V의 시각을 지키려면 `/etc/atmos67/ptp4l.conf`의 `priority1`을 낮춰 Vero V를 그랜드마스터로 만듭니다.
 - **영상과의 동기.** Kodi는 루프백 뒤의 지연을 모르므로, 애드온이 영상이 시작될 때마다 Kodi의 오디오 오프셋을 정해 영상을 늦춥니다("영상 동기" 범주). 오프셋은 다음 값의 합입니다.
   - 송출기가 알려 주는 값: 송출 버퍼, 보정 블록(21 ms), SECS 설계의 필터 지연
@@ -214,7 +217,8 @@ Vero V 실기 없이 만들었습니다.
 
 - Kodi가 `atmos67 (AES67)` 장치를 목록에 보여 주고 TrueHD·DTS-HD까지 패스스루하는지. OSMC의 Kodi는 Amlogic용으로 고친 빌드입니다.
 - 루프백 캡처부터 디코더까지의 경로(시험 환경에 `snd-aloop`이 없습니다)와 Kodi가 포맷을 바꿀 때의 재시작.
-- 실제 AES67 수신기와의 호환, Vero V 이더넷의 PTP 정확도, 하드웨어 타임스탬프 유무.
+- 실제 AES67 수신기와의 호환, Vero V 이더넷의 PTP 정확도, 하드웨어 타임스탬프 유무(위 "PTP 하드웨어 타임스탬프").
+- 송출 루프가 측정이나 디코딩 부하 중에 100 ms 넘게 밀리는지. 밀리면 송출기 로그에 `the timeline was N ms off the clock`이 남습니다. 시험 VM에서는 자주 밀렸지만 VM의 네트워크 탓으로 보입니다(아래 "시험").
 - **성능.** Vero V의 Cortex-A55는 아래 "성능"의 M1보다 몇 배 느리고 32비트로 돕니다. M1에서 실시간의 3배 남짓이던 TrueHD Atmos와 E-AC-3 JOC는 실시간을 따라가지 못할 수 있습니다.
 - 애드온은 XML과 Python 문법, Kodi에 의존하지 않는 부분의 단위 시험만 확인했고 Kodi에서 실행해 보지 않았습니다.
 - 패스스루 중에도 Kodi가 볼륨 키에 `Application.OnVolumeChanged` 알림을 보내는지. 보내지 않으면 볼륨 키를 애드온에 연결하는 키맵이 필요합니다.
@@ -229,7 +233,11 @@ Vero V 실기 없이 만들었습니다.
 - 손상된 버스트는 버리고 다음 버스트부터 다시 디코딩합니다.
 - 디코딩된 오디오가 없는 구간(일시정지, PCM, 미지원 포맷)은 무음으로 채워 출력이 캡처 클록을 따라가게 합니다.
 - E-AC-3는 버스트마다 OpenJOC에 먼저 주고, 거부하면 그 버스트의 채널 베드를 냅니다. 네 번 연속 거부하면 약 1초에 한 번만 다시 시도합니다.
-- TrueHD Atmos의 객체는 OAMD의 위치와 게인을 따르고, 갱신 사이는 지정된 길이로 보간합니다. 객체 크기, 스냅, 구역 제한, 트림은 반영하지 않습니다. 갱신 블록의 시작 시점 단위(32 샘플)는 규격을 확인하지 못한 추정입니다.
+- TrueHD 유닛 하나가 손상되면 디코더만 다음 동기 지점부터 다시 시작하고, 객체와 그 움직임은 그대로 둡니다. E-AC-3에서 OpenJOC가 버스트를 거부해 베드로 넘어갈 때도 OpenJOC가 잡고 있던 앞 유닛의 출력은 냅니다.
+- 송출기는 SIGTERM을 받으면 SAP 삭제 알림을 보내고 끝나므로, 수신기 목록에 옛 스트림이 남지 않습니다.
+- 송출기의 큐가 재생 중 1초 동안 버퍼보다 10 ms 넘게 많으면 초과분을 버립니다(`input ran N ms ahead; dropped it`). 실제 지연이 `latency`로 알리는 값을 넘지 않게 하려는 것이고, 그 순간 소리가 짧게 건너뜁니다.
+- 송출 루프가 시계와 100 ms 넘게 어긋나면 타임라인을 시계로 다시 맞추고 `the timeline was N ms off the clock; restarted from it`를 남깁니다. 그때 측정 신호를 보내던 중이면 그 측정을 거부합니다.
+- TrueHD Atmos의 객체는 OAMD의 위치와 게인을 따르고, 갱신 사이는 지정된 길이로 보간합니다. 새 메타데이터가 오면 같은 시각 이후로 잡혀 있던 옛 갱신은 버립니다. 객체 크기, 스냅, 구역 제한, 트림은 반영하지 않습니다. 갱신 블록의 시작 시점 단위(32 샘플)는 규격을 확인하지 못한 추정입니다.
 
 ## 시험
 
@@ -247,6 +255,14 @@ Vero V 실기 없이 만들었습니다.
 
 - TrueHD Atmos 시험 샘플의 객체는 모두 스피커 위치에 고정돼 있습니다. 움직이는 객체와 방 안쪽에 놓인 객체는 단위 시험으로만 확인했고, 실제 콘텐츠로는 확인하지 못했습니다.
 - E-AC-3 JOC에서 객체로 실린 채널은 OpenJOC가 맞는 스피커를 가장 크게 내지만 이웃 스피커에도 2~3 dB 낮게 함께 냅니다.
+
+샘플 시험이 쓰는 파일은 `samples/Audio Test Files/`에 이 이름으로 둡니다(git에 넣지 않습니다): `Dolby TrueHD 7.1.mkv`, `DTS-HD MA 5.1.mkv`, `DTS-HD MA 7.1.mkv`, `DTS-HD High Resolution 7.1.dtshd`, `DTS-X 7.1.4.mkv`, `Dolby Digital AC-3 5.1.mp4`, `Dolby Digital Plus E-AC-3 5.1.mp4`, `Dolby Digital Plus E-AC-3 7.1.mp4`, `Atmos test tones 1000Hz V4.mp4`, `Dolby Atmos test by Buzz_Buzz_Buzz_ - 7.1.4 master with 5.1 E-AC-3 bed.mp4`, `Dolby Atmos E-AC-3 5.1.2.mp4`, `Dolby Atmos TrueHD, E-AC-3 7.1.4.mkv`(모두 1.6 GB). 없는 파일의 시험은 건너뜁니다.
+
+송출과 보정 측정의 시험은 실시간으로 돕니다.
+
+- `tests/send.rs`는 송출기를 띄워 멀티캐스트를 받습니다. 송출기는 시작하자마자 무음을 보내므로, 패킷을 기다리기 전에 쌓인 것을 비웁니다.
+- `tests/calibrate.rs`(`--ignored`, 몇 분)는 송출기의 RTP를 가짜 방이 받아 마이크로 쓰고, SECS 2R이 설계한 보정이 그 방을 되돌리는지 봅니다. 송출기가 측정을 거부하면(루프가 밀림) 5번까지 다시 잽니다.
+- **VM에서 돌릴 때.** Apple `container` machine에서는 멀티캐스트를 컨테이너 네트워크로 내보내면 송출이 수백 ms씩 멈춰 측정이 매번 거부됐습니다. 시험 바이너리를 `cargo test --release --test calibrate --no-run`으로 만든 뒤, `docker run --network none --cap-add NET_ADMIN …` 안에서 `ip link set lo multicast on; ip route add 224.0.0.0/4 dev lo`를 하고 바이너리를 `--ignored`로 직접 실행하면 멀티캐스트가 루프백에만 돕니다. 네트워크가 없으면 rustup이 툴체인을 받지 못하므로 빌드는 네트워크가 있는 컨테이너에서 합니다. VM을 오래 켜 두면 대기 시간이 크게 늘어서, 다시 시작하는 편이 낫습니다.
 
 ## 성능
 
