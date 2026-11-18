@@ -379,6 +379,23 @@ mod tests {
         dir
     }
 
+    /// The layouts the Kodi add-on offers (packaging/kodi/…/settings.xml).
+    pub const ADDON_PRESETS: [&str; 12] =
+        ["2.0", "5.1", "5.1.2", "5.1.4", "7.1", "7.1.2", "7.1.4", "7.1.6", "9.1", "9.1.2", "9.1.4", "9.1.6"];
+
+    #[test]
+    fn every_offered_preset_has_secs_roles() {
+        for name in ADDON_PRESETS {
+            let labels = openjoc_scene::SpeakerLayout::preset(name).unwrap().channel_labels().to_vec();
+            let (inputs, outputs) = topology(&labels, 1).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(inputs.len(), labels.len(), "{name}");
+            assert_eq!(outputs.last().map(String::as_str), Some("SW1"), "{name}");
+        }
+        // 22.2 has speakers SECS 2R has no role for, so the add-on leaves it out.
+        let labels = openjoc_scene::SpeakerLayout::preset("22.2").unwrap().channel_labels().to_vec();
+        assert!(topology(&labels, 1).is_err());
+    }
+
     #[test]
     fn refuses_unknown_groups_and_speakers() {
         let dir = folder("refuse");

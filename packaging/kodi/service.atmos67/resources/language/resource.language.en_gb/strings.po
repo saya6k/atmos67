@@ -23,16 +23,10 @@ msgid "Speaker layout"
 msgstr ""
 
 msgctxt "#32011"
-msgid "Preset used when no layout file is set."
+msgid "Speaker layout of the room. Positions and distances are left to the measured correction."
 msgstr ""
 
-msgctxt "#32012"
-msgid "Layout file"
-msgstr ""
 
-msgctxt "#32013"
-msgid "Your own speaker positions as an OpenJOC JSON file. Replaces the preset. Azimuth is positive to the left."
-msgstr ""
 
 msgctxt "#32020"
 msgid "Network interface"

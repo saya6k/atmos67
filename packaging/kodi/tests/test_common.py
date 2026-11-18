@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "service.atmos6
 import common  # noqa: E402
 
 SETTINGS = {
-    "layout": "7.1.4", "layout_file_path": "", "interface": "eth0", "address": "239.69.67.1",
+    "layout": "7.1.4", "interface": "eth0", "address": "239.69.67.1",
     "ptp_domain": "0", "buffer_ms": "100", "mode": "1", "subs": "2", "slope": "24",
     "xo_front": "80", "xo_center": "90", "xo_surround": "0", "xo_back": "80", "xo_top": "100",
 }

@@ -20,23 +20,10 @@
               <option>9.1.2</option>
               <option>9.1.4</option>
               <option>9.1.6</option>
-              <option>22.2</option>
             </options>
           </constraints>
           <control type="list" format="string">
             <heading>32010</heading>
-          </control>
-        </setting>
-        <setting id="layout_file" type="path" label="32012" help="32013">
-          <level>0</level>
-          <default/>
-          <constraints>
-            <writable>false</writable>
-            <masking>.json</masking>
-            <allowempty>true</allowempty>
-          </constraints>
-          <control type="button" format="file">
-            <heading>32012</heading>
           </control>
         </setting>
       </group>

@@ -75,7 +75,7 @@ def calibrate():
     if not wait_for_sender():
         xbmcgui.Dialog().ok(text(32100), text(32102))
         return
-    layout = ["--layout-file", settings["layout_file_path"]] if settings["layout_file_path"] else ["--layout", settings["layout"]]
+    layout = ["--layout", settings["layout"]]
     common_args = ["--project", project, "--control", common.CONTROL, "--mic", microphone]
     start = ["start"] + layout + ["--subs", settings["subs"]] + common_args
     mic_cal = addon.getSetting("mic_cal")

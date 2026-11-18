@@ -28,7 +28,7 @@ def outputs(settings, profile):
         manifest = os.path.join(common.auto_design(profile), "secs-design.json")
     else:
         folder = tempfile.mkdtemp()
-        layout = ["--layout-file", settings["layout_file_path"]] if settings["layout_file_path"] else ["--layout", settings["layout"]]
+        layout = ["--layout", settings["layout"]]
         subprocess.run(["/usr/bin/atmos67"] + layout + ["--write-design", folder, "--subs", settings["subs"]], check=True)
         manifest = os.path.join(folder, "secs-design.json")
     with open(manifest, encoding="utf-8") as file:

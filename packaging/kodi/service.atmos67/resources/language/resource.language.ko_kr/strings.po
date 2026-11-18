@@ -23,16 +23,10 @@ msgid "Speaker layout"
 msgstr "스피커 배치"
 
 msgctxt "#32011"
-msgid "Preset used when no layout file is set."
-msgstr "배치 파일을 지정하지 않았을 때 쓰는 프리셋입니다."
+msgid "Speaker layout of the room. Positions and distances are left to the measured correction."
+msgstr "방의 스피커 배치입니다. 실제 위치와 거리는 측정 보정이 맞춥니다."
 
-msgctxt "#32012"
-msgid "Layout file"
-msgstr "배치 파일"
 
-msgctxt "#32013"
-msgid "Your own speaker positions as an OpenJOC JSON file. Replaces the preset. Azimuth is positive to the left."
-msgstr "실제 스피커 위치를 적은 OpenJOC JSON 파일입니다. 프리셋 대신 쓰입니다. 방위각은 왼쪽이 양수입니다."
 
 msgctxt "#32020"
 msgid "Network interface"

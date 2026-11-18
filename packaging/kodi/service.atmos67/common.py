@@ -89,7 +89,6 @@ def values(settings, levels, profile, volume, mode=None):
     crossover = {group: int(settings[f"xo_{group}"]) for group in GROUPS if int(settings[f"xo_{group}"] or 0) > 0}
     return {
         "LAYOUT": settings["layout"],
-        "LAYOUT_FILE": settings.get("layout_file_path", ""),
         "INTERFACE": settings["interface"],
         "ADDRESS": settings["address"],
         "PTP_DOMAIN": settings["ptp_domain"],

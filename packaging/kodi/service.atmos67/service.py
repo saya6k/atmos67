@@ -20,7 +20,7 @@ import common
 
 ADDON_ID = "service.atmos67"
 UNITS = ["atmos67-ptp4l.service", "atmos67-phc2sys.service", "atmos67.service"]
-SETTINGS = ["layout", "layout_file", "interface", "address", "ptp_domain", "buffer_ms", "mode", "subs", "slope",
+SETTINGS = ["layout", "interface", "address", "ptp_domain", "buffer_ms", "mode", "subs", "slope",
             "max_volume_db"] + [f"xo_{group}" for group in common.GROUPS]
 
 
@@ -39,10 +39,7 @@ def profile():
 
 def settings():
     current = addon()
-    values = {key: current.getSetting(key) for key in SETTINGS}
-    layout_file = values["layout_file"]
-    values["layout_file_path"] = xbmcvfs.translatePath(layout_file) if layout_file else ""
-    return values
+    return {key: current.getSetting(key) for key in SETTINGS}
 
 
 def kodi_volume():
