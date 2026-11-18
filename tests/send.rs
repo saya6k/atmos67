@@ -60,11 +60,22 @@ fn listen(first: Ipv4Addr, streams: usize) -> Ports {
     Ports { rtp, sap }
 }
 
+/// Empties `rtp` of the idle silence received so far. It fills the receive
+/// buffer in about 50 ms, after which the packets a test waits for would be
+/// dropped.
+fn drain(rtp: &UdpSocket) {
+    let mut packet = [0u8; 2048];
+    rtp.set_nonblocking(true).unwrap();
+    while rtp.recv_from(&mut packet).is_ok() {}
+    rtp.set_nonblocking(false).unwrap();
+}
+
 /// Feeds `input` to `child` and collects its streams, told apart by payload
 /// size: `sizes[i]` is the channel count of stream `i`.
 fn receive(ports: Ports, mut child: Child, sizes: &[usize], input: &[f32]) -> Received {
     let Ports { rtp, sap } = ports;
 
+    drain(&rtp);
     let mut stdin = child.stdin.take().unwrap();
     let bytes: Vec<u8> = input.iter().flat_map(|s| s.to_le_bytes()).collect();
     let writer = std::thread::spawn(move || stdin.write_all(&bytes).unwrap());
@@ -272,6 +283,7 @@ fn plays_measurement_frames_from_its_socket_in_place_of_the_program() {
     let frames: Vec<f32> = (0..100 * CHANNELS).map(|i| (i + 1) as f32 / 10_000.0).collect();
     let mut message = format!("play {CHANNELS} 100\n").into_bytes();
     message.extend(frames.iter().flat_map(|s| s.to_le_bytes()));
+    drain(&rtp);
     (&connection).write_all(&message).unwrap();
     let mut reply = String::new();
     BufReader::new(&connection).read_line(&mut reply).unwrap();
@@ -281,7 +293,9 @@ fn plays_measurement_frames_from_its_socket_in_place_of_the_program() {
     let mut first_stream = Vec::new();
     let mut first_timestamp = None;
     let mut packet = [0u8; 2048];
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
     while first_stream.len() < 3 * 48 * 8 {
+        assert!(std::time::Instant::now() < deadline, "no measurement packets");
         let (n, _) = rtp.recv_from(&mut packet).expect("sender stopped early");
         if n - 12 == 8 * 48 * 3 && (!first_stream.is_empty() || packet[12..n].iter().any(|b| *b != 0)) {
             first_timestamp.get_or_insert(u32::from_be_bytes(packet[4..8].try_into().unwrap()));
