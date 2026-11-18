@@ -176,6 +176,12 @@ def config_text(values):
     return "".join(f"{key}={quote(value)}\n" for key, value in values.items())
 
 
+def replace_volume(text, volume):
+    """`text`, a configuration from config_text, with its volume set to `volume`."""
+    return "".join(f"VOLUME_DB={quote(volume)}\n" if line.startswith("VOLUME_DB=") else line + "\n"
+                   for line in text.splitlines())
+
+
 def command(line, path=CONTROL, timeout=5.0):
     """Sends one command to the sender and returns its answer."""
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:

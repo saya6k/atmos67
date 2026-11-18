@@ -89,7 +89,23 @@ def apply(mode=None):
         restart()
 
 
+def save_volume(percent, muted):
+    """Keeps the configuration's volume current without touching the rest of
+    it, so a restart that does not go through apply() starts at this volume."""
+    path = os.path.join(profile(), "atmos67.conf")
+    try:
+        with open(path, encoding="utf-8") as file:
+            old = file.read()
+    except FileNotFoundError:
+        return
+    new = common.replace_volume(old, volume_db(percent, muted))
+    if new != old:
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(new)
+
+
 def send_volume(percent, muted):
+    save_volume(percent, muted)
     try:
         if muted:
             common.command("mute 1")

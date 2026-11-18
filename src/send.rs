@@ -60,6 +60,14 @@ const SAP_INTERVAL: Duration = Duration::from_secs(30);
 const TAI_MINUS_UTC: Duration = Duration::from_secs(37);
 /// Packets the reader may queue beyond the playout buffer before it blocks.
 const QUEUE_SLACK: usize = 100;
+/// Packets over a second (1000 of them) the queue never drained below.
+const TRIM_WINDOW: u32 = 1000;
+/// How far above the playout buffer the queue may stay for a whole window
+/// before the excess is dropped, so the delay stays what `latency` reports.
+const TRIM_MARGIN: usize = 10;
+/// The largest `play`: ten minutes of audio. SECS 2R plays a whole
+/// position's sweeps, every channel in turn, as one signal of minutes.
+const MAX_PLAY_FRAMES: usize = 600 * RATE as usize;
 /// A send time this far from the clock means the clock was stepped or the
 /// process was stalled; the timeline restarts from the clock.
 const MAX_CLOCK_ERROR: u64 = RATE / 10;
@@ -184,7 +192,7 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
         }
         let socket = UdpSocket::bind((source, 0))?;
         socket.set_multicast_ttl_v4(TTL)?;
-        let session = session_id(&name, address);
+        let session = fnv(name.bytes().chain(address.octets()));
         let carried: Vec<&str> = map.iter().map(|&c| names.get(c).map_or("?", String::as_str)).collect();
         eprintln!("atmos67: sending {name} [{}] to {address}:{RTP_PORT} from {source}", carried.join(" "));
         described.push(serde_json::json!({
@@ -232,9 +240,10 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
 
     let announcer = UdpSocket::bind((source, 0))?;
     announcer.set_multicast_ttl_v4(TTL)?;
+    // The SAP message hash changes exactly when the description does.
     let announcements: Vec<(u16, String)> = streams
         .iter()
-        .map(|stream| (stream.ssrc as u16, stream.sdp.clone()))
+        .map(|stream| (fnv(stream.sdp.bytes()) as u16, stream.sdp.clone()))
         .collect();
     {
         let announcer = announcer.try_clone()?;
@@ -265,8 +274,11 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
     let mut scaled = Vec::new();
     let mut playing = false;
     let mut send_failed = false;
+    // The least the queue held while playing in the current window.
+    let (mut lowest, mut window) = (usize::MAX, 0u32);
     let mut next = ptp_samples(SystemTime::now());
-    loop {
+    stop_on_signals();
+    while !STOP.load(Ordering::Relaxed) {
         let now = ptp_samples(SystemTime::now());
         if now.abs_diff(next) > MAX_CLOCK_ERROR {
             next = now;
@@ -279,6 +291,20 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
             let mut queue = lock.lock().expect("reader does not panic");
             if queue.packets.len() >= buffer.max(1) || queue.closed {
                 playing = true;
+            }
+            if playing && !queue.closed {
+                lowest = lowest.min(queue.packets.len());
+                window += 1;
+                if window == TRIM_WINDOW {
+                    if lowest != usize::MAX && lowest > buffer + TRIM_MARGIN {
+                        let excess = lowest - buffer;
+                        queue.packets.drain(..excess);
+                        eprintln!("atmos67: input ran {excess} ms ahead; dropped it");
+                    }
+                    (lowest, window) = (usize::MAX, 0);
+                }
+            } else {
+                (lowest, window) = (usize::MAX, 0);
             }
             let packet = if playing { queue.packets.pop_front() } else { None };
             if packet.is_none() {
@@ -410,11 +436,15 @@ fn play(
     let (Ok(count), Ok(frames)) = (count.parse::<usize>(), frames.parse::<usize>()) else {
         return Err("play takes a channel count and a frame count".into());
     };
-    let mut bytes = vec![0u8; count * frames * 4];
-    reader.read_exact(&mut bytes).map_err(|e| format!("reading frames: {e}"))?;
+    // Checked before the frames are read, so a bad size cannot exhaust memory.
     if count != channels {
         return Err(format!("{count} channels given, {channels} sent"));
     }
+    if frames > MAX_PLAY_FRAMES {
+        return Err(format!("{frames} frames given; at most {MAX_PLAY_FRAMES}"));
+    }
+    let mut bytes = vec![0u8; count * frames * 4];
+    reader.read_exact(&mut bytes).map_err(|e| format!("reading frames: {e}"))?;
     let mut samples: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
     let size = PACKET_FRAMES * channels;
     samples.resize(samples.len().div_ceil(size) * size, 0.0);
@@ -477,8 +507,14 @@ fn serve(connection: std::os::unix::net::UnixStream, controls: &Controls) {
             change(&mut volume);
             controls.gain.store(volume.gain().to_bits(), Ordering::Relaxed);
         };
+        // After a failed `play` its frames may be left unread: the connection ends.
+        let mut close = false;
         let reply = match line.split_whitespace().collect::<Vec<_>>()[..] {
-            ["play", count, frames] => play(&mut reader, count, frames, controls.channels, &controls.measurement),
+            ["play", count, frames] => {
+                let reply = play(&mut reader, count, frames, controls.channels, &controls.measurement);
+                close = reply.is_err();
+                reply
+            }
             ["latency"] => Ok(format!("{:.1}", status.info["latency_ms"].as_f64().unwrap_or_default())),
             ["status"] => {
                 let volume = *controls.volume.lock().expect("no panic holds the volume");
@@ -508,7 +544,7 @@ fn serve(connection: std::os::unix::net::UnixStream, controls: &Controls) {
             Ok(value) => format!("ok {value}\n"),
             Err(e) => format!("error: {e}\n"),
         };
-        if writer.write_all(reply.as_bytes()).is_err() {
+        if writer.write_all(reply.as_bytes()).is_err() || close {
             return;
         }
     }
@@ -543,16 +579,33 @@ fn rtp_packet(
     packet
 }
 
-/// The SDP session ID of the stream `name` sent to `address`. Receivers
+/// Set by SIGTERM or SIGINT: the sender stops and withdraws its streams.
+static STOP: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn stop(_: libc::c_int) {
+    STOP.store(true, Ordering::Relaxed);
+}
+
+fn stop_on_signals() {
+    let handler = stop as extern "C" fn(libc::c_int) as libc::sighandler_t;
+    // SAFETY: the handler only stores to an atomic, which is async-signal-safe.
+    unsafe {
+        libc::signal(libc::SIGTERM, handler);
+        libc::signal(libc::SIGINT, handler);
+    }
+}
+
+/// FNV-1a of `bytes`, in 62 bits, as some SDP parsers read numbers signed.
+/// The session ID of a stream is that of its name and address: receivers
 /// such as Dante keep their subscriptions by it, so it stays the same
-/// across restarts (FNV-1a of both; 62 bits, as some parsers read it signed).
-fn session_id(name: &str, address: Ipv4Addr) -> u64 {
-    let bytes = name.bytes().chain(address.octets());
+/// across restarts.
+fn fnv(bytes: impl Iterator<Item = u8>) -> u64 {
     bytes.fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3))
         >> 2
 }
 
 /// The session description aes67-linux-daemon publishes for such a stream.
+/// Its origin's version is a hash of the rest, so receivers see a change.
 fn sdp(
     name: &str,
     session: u64,
@@ -561,10 +614,8 @@ fn sdp(
     channels: usize,
     config: &Config,
 ) -> String {
-    format!(
-        "v=0\r\n\
-         o=- {session} 0 IN IP4 {source}\r\n\
-         s={name}\r\n\
+    let body = format!(
+        "s={name}\r\n\
          c=IN IP4 {address}/{TTL}\r\n\
          t=0 0\r\n\
          a=clock-domain:PTPv2 {domain}\r\n\
@@ -579,7 +630,9 @@ fn sdp(
          a=recvonly\r\n",
         gmid = config.gmid,
         domain = config.domain,
-    )
+    );
+    let version = fnv(source.octets().into_iter().chain(body.bytes()));
+    format!("v=0\r\no=- {session} {version} IN IP4 {source}\r\n{body}")
 }
 
 /// A SAP (RFC 2974) announcement of `sdp`, or its deletion.
@@ -611,10 +664,10 @@ mod tests {
 
     #[test]
     fn session_ids_survive_restarts_and_differ_between_streams() {
-        let address = Ipv4Addr::new(239, 69, 67, 1);
-        assert_eq!(session_id("atmos67 ch 1-8", address), session_id("atmos67 ch 1-8", address));
-        assert_ne!(session_id("atmos67 ch 1-8", address), session_id("atmos67 ch 9-12", address));
-        assert_ne!(session_id("atmos67 ch 1-8", address), session_id("atmos67 ch 1-8", Ipv4Addr::new(239, 69, 67, 2)));
+        let id = |name: &str, last: u8| fnv(name.bytes().chain([239, 69, 67, last]));
+        assert_eq!(id("atmos67 ch 1-8", 1), id("atmos67 ch 1-8", 1));
+        assert_ne!(id("atmos67 ch 1-8", 1), id("atmos67 ch 9-12", 1));
+        assert_ne!(id("atmos67 ch 1-8", 1), id("atmos67 ch 1-8", 2));
     }
 
     #[test]
@@ -677,12 +730,32 @@ mod tests {
             4,
             &config,
         );
-        assert!(sdp.starts_with("v=0\r\no=- 7 0 IN IP4 10.0.0.2\r\ns=atmos67 ch 9-12\r\n"));
+        assert!(sdp.starts_with("v=0\r\no=- 7 "));
+        assert!(sdp.contains(" IN IP4 10.0.0.2\r\ns=atmos67 ch 9-12\r\n"));
         assert!(sdp.contains("\r\nc=IN IP4 239.69.67.2/15\r\n"));
         assert!(sdp.contains("\r\nm=audio 5004 RTP/AVP 98\r\n"));
         assert!(sdp.contains("\r\na=rtpmap:98 L24/48000/4\r\n"));
         assert!(sdp.contains("\r\na=ts-refclk:ptp=IEEE1588-2008:00-11-22-FF-FE-33-44-55:3\r\n"));
         assert!(sdp.contains("\r\na=clock-domain:PTPv2 3\r\n"));
+    }
+
+    #[test]
+    fn sdp_version_changes_with_the_description_only() {
+        let config = Config {
+            address: Ipv4Addr::new(239, 69, 67, 1),
+            gmid: "00-11-22-FF-FE-33-44-55".to_owned(),
+            domain: 0,
+            buffer_ms: 100,
+            volume_db: 0.0,
+            control: None,
+            streams: None,
+        };
+        let version = |channels: usize| {
+            let sdp = sdp("s", 7, Ipv4Addr::new(10, 0, 0, 2), Ipv4Addr::new(239, 69, 67, 1), channels, &config);
+            sdp.lines().nth(1).unwrap().split(' ').nth(2).unwrap().to_string()
+        };
+        assert_eq!(version(6), version(6));
+        assert_ne!(version(6), version(7));
     }
 
     #[test]

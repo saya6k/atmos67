@@ -18,11 +18,17 @@ def text(string_id, *args):
     return value % args if args else value
 
 
-def dante(args):
-    """Runs `atmos67 dante …`; its JSON lines, or None after showing the error."""
+def dante(args, progress=None):
+    """Runs `atmos67 dante …`; its JSON lines, or None after showing the error.
+    `progress`, a dialog shown meanwhile, is closed before anything else shows."""
     try:
         result = subprocess.run([ATMOS67, "dante"] + args, capture_output=True, text=True, timeout=30)
     except subprocess.TimeoutExpired:
+        result = None
+    finally:
+        if progress is not None:
+            progress.close()
+    if result is None:
         xbmcgui.Dialog().ok(text(32160), text(32166) + "\ntimed out")
         return None
     if result.returncode != 0:
@@ -61,8 +67,7 @@ def connect(device):
 def manage():
     dialog = xbmcgui.DialogProgress()
     dialog.create(text(32160), text(32161))
-    devices = dante(["list", "--seconds", "3"])
-    dialog.close()
+    devices = dante(["list", "--seconds", "3"], dialog)
     if devices is None:
         return
     if not devices:

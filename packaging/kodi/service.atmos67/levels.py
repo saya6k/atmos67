@@ -22,17 +22,20 @@ def text(string_id, *args):
     return value % args if args else value
 
 
-def outputs(settings, profile):
-    """The roles of the outputs the service sends in its current mode."""
-    if common.MODES[int(settings["mode"] or 0)] == "auto":
-        manifest = os.path.join(common.auto_design(profile), "secs-design.json")
-    else:
-        folder = tempfile.mkdtemp()
+def outputs(settings, profile, sent=False):
+    """The roles of the outputs of the correction in the current mode. With
+    `sent`, the channels the service sends: without correction ("off"), the
+    rendered speakers, LFE included, rather than the outputs a design would have."""
+    mode = common.MODES[int(settings["mode"] or 0)]
+    if mode == "auto":
+        with open(os.path.join(common.auto_design(profile), "secs-design.json"), encoding="utf-8") as file:
+            return json.load(file)["outputs"]
+    with tempfile.TemporaryDirectory() as folder:
         layout = ["--layout", settings["layout"]]
         subprocess.run(["/usr/bin/atmos67"] + layout + ["--write-design", folder, "--subs", settings["subs"]], check=True)
-        manifest = os.path.join(folder, "secs-design.json")
-    with open(manifest, encoding="utf-8") as file:
-        return json.load(file)["outputs"]
+        with open(os.path.join(folder, "secs-design.json"), encoding="utf-8") as file:
+            manifest = json.load(file)
+    return manifest["inputs"] if sent and mode == "off" else manifest["outputs"]
 
 
 def number(heading, value):

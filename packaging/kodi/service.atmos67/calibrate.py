@@ -71,10 +71,6 @@ def calibrate():
         return
     project = os.path.join(profile, "calibration")
     shutil.rmtree(project, ignore_errors=True)
-    service.apply(mode="measure")
-    if not wait_for_sender():
-        xbmcgui.Dialog().ok(text(32100), text(32102))
-        return
     layout = ["--layout", settings["layout"]]
     common_args = ["--project", project, "--control", common.CONTROL, "--mic", microphone]
     start = ["start"] + layout + ["--subs", settings["subs"]] + common_args
@@ -82,9 +78,14 @@ def calibrate():
     if mic_cal:
         start += ["--mic-cal", xbmcvfs.translatePath(mic_cal)]
 
-    dialog = xbmcgui.DialogProgress()
-    dialog.create(text(32100))
+    dialog = None
+    service.apply(mode="measure")
     try:
+        if not wait_for_sender():
+            xbmcgui.Dialog().ok(text(32100), text(32102))
+            return
+        dialog = xbmcgui.DialogProgress()
+        dialog.create(text(32100))
         if run(dialog, start, text(32103)) is None:
             return
         for position in range(1, positions + 1):
@@ -111,7 +112,8 @@ def calibrate():
         os.replace(link + ".new", link)
         addon.setSetting("mode", str(common.MODES.index("auto")))
     finally:
-        dialog.close()
+        if dialog is not None:
+            dialog.close()
         # Back to the settings: the new correction, or the old one when cancelled.
         service.apply()
     xbmcgui.Dialog().ok(text(32100), text(32107))

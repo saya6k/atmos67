@@ -125,9 +125,11 @@ pub fn write(folder: &Path, labels: &[String], base: Option<&Path>, settings: &S
         .iter()
         .map(|v| v.as_str().unwrap_or_default().to_string())
         .collect();
+    // Settings kept from another layout or subwoofer count do not stop the
+    // rest of the correction.
     for role in settings.trims.keys().chain(settings.delays.keys()) {
         if !outputs.contains(role) {
-            return Err(format!("{role} is not an output of the design ({})", outputs.join(" ")).into());
+            eprintln!("atmos67: {role} is not an output of the design ({}); left out", outputs.join(" "));
         }
     }
 
@@ -368,7 +370,9 @@ mod tests {
         let text = fs::read_to_string(overlay.join("configs/design.yml")).unwrap();
         assert!(text.contains("trim_SW1"));
         fs::remove_dir_all(base).unwrap();
-        assert!(write(&overlay, &labels(), Some(&dir), &Settings { order: 4, trims: [("SW9".into(), 1.0)].into(), ..Settings::default() }).is_err());
+        // A trim for an output the design lacks is left out.
+        write(&overlay, &labels(), Some(&dir), &Settings { order: 4, trims: [("SW9".into(), 1.0)].into(), ..Settings::default() }).unwrap();
+        assert!(!fs::read_to_string(overlay.join("configs/design.yml")).unwrap().contains("SW9"));
         fs::remove_dir_all(dir).unwrap();
         fs::remove_dir_all(overlay).unwrap();
     }

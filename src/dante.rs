@@ -49,6 +49,11 @@ pub struct Flow {
 
 /// The Dante devices that answer on the network within `wait`.
 pub fn discover(wait: Duration) -> Result<Vec<Device>> {
+    discover_until(wait, |_| false)
+}
+
+/// The devices that answer within `wait`, or until one satisfies `done`.
+fn discover_until(wait: Duration, done: impl Fn(&Device) -> bool) -> Result<Vec<Device>> {
     let daemon = ServiceDaemon::new()?;
     let events = daemon.browse(SERVICE_ARC)?;
     let suffix = format!(".{SERVICE_ARC}");
@@ -77,7 +82,12 @@ pub fn discover(wait: Duration) -> Result<Vec<Device>> {
             .and_then(|property| property.val())
             .and_then(|value| std::str::from_utf8(value).ok())
             .map(String::from);
-        found.insert(name.clone(), Device { name, ipv4, port: service.get_port(), protocol_version });
+        let device = Device { name: name.clone(), ipv4, port: service.get_port(), protocol_version };
+        let last = done(&device);
+        found.insert(name, device);
+        if last {
+            break;
+        }
     }
     let _ = daemon.shutdown();
     Ok(found.into_values().collect())
@@ -85,9 +95,10 @@ pub fn discover(wait: Duration) -> Result<Vec<Device>> {
 
 /// The device called `name`, looked for for up to `wait`.
 pub fn find(name: &str, wait: Duration) -> Result<Device> {
-    discover(wait)?
+    let called = |device: &Device| device.name.eq_ignore_ascii_case(name);
+    discover_until(wait, called)?
         .into_iter()
-        .find(|device| device.name.eq_ignore_ascii_case(name))
+        .find(called)
         .ok_or_else(|| format!("no Dante device called {name} answered").into())
 }
 
@@ -102,24 +113,25 @@ fn client(device: &Device) -> Result<Client> {
 
 /// Turns AES67 mode on or off. Dante devices apply it after a reboot.
 /// netaudio sends the command without waiting for an answer, so the
-/// configured setting is read back to confirm the device took it.
-pub fn set_aes67(device: &Device, enabled: bool) -> Result<()> {
+/// configured setting is read back to confirm the device took it. Returns
+/// false when the device answers but does not report the setting.
+pub fn set_aes67(device: &Device, enabled: bool) -> Result<bool> {
     let command = json!({ "command": "enable_aes67", "enabled": enabled }).to_string();
     let mut client = client(device)?;
     client.execute(&command).map_err(|e| failed(device, e))?;
-    let mut configured = None;
+    let mut last = Ok(None);
     for _ in 0..ATTEMPTS {
         std::thread::sleep(Duration::from_millis(300));
-        configured = client.get_aes67_configured().map_err(|e| failed(device, e))?;
-        if configured == Some(enabled) {
-            return Ok(());
+        // A device busy saving its configuration may miss a read; read again.
+        match client.get_aes67_configured() {
+            Ok(Some(configured)) if configured == enabled => return Ok(true),
+            other => last = other.map_err(|e| failed(device, e)),
         }
     }
-    Err(match configured {
-        Some(_) => format!("{} still has AES67 {}", device.name, if enabled { "off" } else { "on" }),
-        None => format!("{} does not report its AES67 setting", device.name),
+    match last? {
+        Some(_) => Err(format!("{} still has AES67 {}", device.name, if enabled { "off" } else { "on" }).into()),
+        None => Ok(false),
     }
-    .into())
 }
 
 /// The subscription request for `flow` onto receiver channels from

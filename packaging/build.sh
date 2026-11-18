@@ -22,6 +22,7 @@ stage=$(mktemp -d)
 cp -R packaging/deb "$stage/deb"
 cp -R packaging/kodi/service.atmos67 "$stage/service.atmos67"
 find "$stage" -name .DS_Store -delete
+find "$stage" -name __pycache__ -prune -exec rm -rf {} +
 sed -i "s/@VERSION@/$version/" "$stage/deb/DEBIAN/control" "$stage/service.atmos67/addon.xml"
 
 install -D -m 755 "target/$target/release/atmos67" "$stage/deb/usr/bin/atmos67"

@@ -32,6 +32,11 @@ class ConfigTest(unittest.TestCase):
         self.assertIn('MODE="manual"\n', text)
         self.assertIn('VOLUME_DB="-20.0"\n', text)
 
+    def test_volume_changes_alone(self):
+        text = common.config_text(common.values(SETTINGS, LEVELS, "/p", -20.0))
+        changed = common.replace_volume(text, -35.5)
+        self.assertEqual(changed, common.config_text(common.values(SETTINGS, LEVELS, "/p", -35.5)))
+
     def test_measured_correction_keeps_trims_but_not_distances(self):
         values = common.values(dict(SETTINGS, mode="2"), LEVELS, "/p", 0)
         self.assertEqual((values["MODE"], values["TRIMS"], values["DELAYS"]), ("auto", "L=-1.5 SW1=2.0", ""))

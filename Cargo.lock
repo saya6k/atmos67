@@ -47,6 +47,7 @@ name = "atmos67"
 version = "0.1.0"
 dependencies = [
  "ffmpeg-next",
+ "libc",
  "mdns-sd",
  "netaudio-core",
  "openjoc-api",

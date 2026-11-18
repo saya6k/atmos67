@@ -12,7 +12,7 @@ use std::error::Error;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -86,6 +86,16 @@ pub(crate) fn ask(socket: &mut UnixStream, message: &[u8]) -> Result<String> {
     Ok(answer.strip_prefix("ok").ok_or_else(|| format!("sender: {answer}"))?.trim().to_string())
 }
 
+/// A capture process, killed when dropped.
+struct Recording(Child);
+
+impl Drop for Recording {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 /// Measures from output channel `channel` (0 first) of the sender at
 /// `control`, recording with `capture` (a command printing mono FLOAT32LE),
 /// and returns the latency in milliseconds.
@@ -103,6 +113,8 @@ pub fn measure(control: &Path, capture: &[String], channel: usize) -> Result<f64
         .map_err(|e| format!("{program}: {e}"))?;
     let overrun = crate::measure::watch_overruns(&mut child);
     let mut stdout = child.stdout.take().expect("piped");
+    // Stops the recording however this returns, so the microphone is let go.
+    let recording = Recording(child);
     let (stop_tx, stop_rx) = mpsc::channel::<()>();
     let recorder = thread::spawn(move || {
         let (mut bytes, mut reads, mut chunk) = (Vec::new(), Vec::new(), [0u8; 4096]);
@@ -130,8 +142,7 @@ pub fn measure(control: &Path, capture: &[String], channel: usize) -> Result<f64
     let started: f64 = ask(&mut UnixStream::connect(control)?, &message)?.parse()?;
     thread::sleep(TAIL);
     let _ = stop_tx.send(());
-    let _ = child.kill();
-    let _ = child.wait();
+    drop(recording);
     let (bytes, reads) = recorder.join().map_err(|_| "recorder failed")?;
     if overrun.load(std::sync::atomic::Ordering::Relaxed) {
         return Err("the microphone's capture overran; measure again".into());

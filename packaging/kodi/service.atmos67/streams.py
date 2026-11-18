@@ -5,6 +5,7 @@ multicast address and up to 8 of the outputs the service sends. Without a
 plan the service sends 8 channels a stream in order.
 """
 
+import copy
 import subprocess
 
 import xbmcgui
@@ -56,12 +57,12 @@ def edit():
     profile = service.profile()
     settings = service.settings()
     try:
-        outputs = levels.outputs(settings, profile)
+        outputs = levels.outputs(settings, profile, sent=True)
     except (OSError, subprocess.CalledProcessError, ValueError, KeyError):
         xbmcgui.Dialog().ok(text(32120), text(32114))
         return
-    streams = common.read_streams(profile) or common.default_streams(outputs, settings["address"])
-    changed = False
+    saved = common.read_streams(profile)
+    streams = copy.deepcopy(saved) or common.default_streams(outputs, settings["address"])
     while True:
         left = common.unassigned(outputs, streams)
         rows = [row(stream) for stream in streams] + [text(32121), text(32122)]
@@ -69,7 +70,6 @@ def edit():
         chosen = xbmcgui.Dialog().select(heading, rows)
         if chosen < 0:
             break
-        changed = True
         if chosen == len(streams):
             taken = {s["address"] for s in streams}
             address = next(common.address_after(settings["address"], n) for n in range(256)
@@ -81,9 +81,9 @@ def edit():
             streams = common.default_streams(outputs, settings["address"])
         elif not edit_stream(streams[chosen], outputs):
             streams.pop(chosen)
-    if changed:
-        # The default plan is what the service does without one.
-        plan = [] if streams == common.default_streams(outputs, settings["address"]) else streams
+    # The default plan is what the service does without one.
+    plan = [] if streams == common.default_streams(outputs, settings["address"]) else streams
+    if plan != saved:
         common.write_streams(profile, plan)
         service.write_config()
         service.restart()

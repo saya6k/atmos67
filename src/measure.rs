@@ -203,7 +203,11 @@ impl InputSession for Input {
         let mut stdout = child.stdout.take().expect("piped");
         // Recording counts as started once the device delivers.
         let mut first = vec![0u8; 4 * self.channels];
-        stdout.read_exact(&mut first).map_err(|e| backend_error(format!("{program} gave no audio: {e}")))?;
+        if let Err(e) = stdout.read_exact(&mut first) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(backend_error(format!("{program} gave no audio: {e}")));
+        }
         self.pending = first;
         self.child = Some(child);
         self.stdout = Some(stdout);

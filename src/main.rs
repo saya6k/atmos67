@@ -58,7 +58,15 @@ const MAX_LAG_FRAMES: u64 = 2 * 1536;
 /// stopped: one and a half E-AC-3 burst periods.
 const GAP_FRAMES: u64 = 1536 * 3 / 2;
 
-fn main() -> Result<(), Box<dyn Error>> {
+/// Errors go to stderr as text, which the Kodi add-on shows as it is.
+fn main() {
+    if let Err(error) = run() {
+        eprintln!("atmos67: {error}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), Box<dyn Error>> {
     if std::env::args().nth(1).as_deref() == Some("calibrate") {
         return calibration(std::env::args().skip(2));
     }
@@ -400,9 +408,11 @@ fn dante_command(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn E
     let wait = std::time::Duration::from_secs(seconds);
     let find = |device: Option<String>| -> Result<dante::Device, Box<dyn Error>> {
         let device = device.ok_or(USAGE)?;
-        Ok(match (ipv4, port) {
-            (Some(ipv4), Some(port)) => dante::Device { name: device, ipv4, port, protocol_version: protocol.clone() },
-            _ => dante::find(&device, wait)?,
+        Ok(match (ipv4, port, &protocol) {
+            (Some(ipv4), Some(port), _) => dante::Device { name: device, ipv4, port, protocol_version: protocol.clone() },
+            (None, None, None) => dante::find(&device, wait)?,
+            // Where the device is takes both --ipv4 and --port.
+            _ => return Err(USAGE.into()),
         })
     };
     match step.as_str() {
@@ -417,8 +427,12 @@ fn dante_command(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn E
         }
         "aes67" => {
             let found = find(device)?;
-            dante::set_aes67(&found, on)?;
-            println!("{}", serde_json::json!({ "device": found.name, "aes67": on, "note": "takes effect after the device reboots" }));
+            let confirmed = dante::set_aes67(&found, on)?;
+            println!(
+                "{}",
+                serde_json::json!({ "device": found.name, "aes67": on, "confirmed": confirmed,
+                                    "note": "takes effect after the device reboots" })
+            );
         }
         "connect" => {
             let flow = dante::flow(&control.ok_or(USAGE)?, &stream.clone().ok_or(USAGE)?)?;
