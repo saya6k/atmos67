@@ -41,7 +41,7 @@
 ## Tech Stack
 
 - Rust 1.99+(`rust-toolchain.toml`은 1.100.0), edition 2024, 단일 바이너리 크레이트
-- `openjoc-api`, `openjoc-scene` (git, 커밋 고정) — E-AC-3 JOC, 배치 파일 파싱
+- `openjoc-api`, `openjoc-scene` (git, 릴리스 태그 고정) — E-AC-3 JOC, 배치 파일 파싱
 - `truehd` (crates.io) — TrueHD 디코딩과 OAMD
 - `ffmpeg-next` (crates.io) + 시스템 FFmpeg 라이브러리 — AC-3, E-AC-3, DTS 계열
 - SECS 2R 공개 크레이트 (crates.io, AGPL-3.0-only) — 측정과 보정 계산 (`tasks/dsp.md`)
