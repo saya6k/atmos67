@@ -29,13 +29,15 @@ enum Filter {
 }
 
 struct Mixer {
+    inputs: usize,
     outputs: usize,
     /// For each output channel, its sources as (input channel, linear gain).
     mapping: Vec<Vec<(usize, f64)>>,
 }
 
 enum Step {
-    Mixer(String),
+    /// None when bypassed.
+    Mixer(Option<String>),
     Filter { channels: Vec<usize>, names: Vec<String> },
 }
 
@@ -194,6 +196,7 @@ fn filter(spec: &Value, folder: &Path) -> Result<Filter> {
 }
 
 fn mixer(spec: &Value) -> Result<Mixer> {
+    let inputs = count(&spec["channels"]["in"])?;
     let outputs = count(&spec["channels"]["out"])?;
     let mut mapping = vec![Vec::new(); outputs];
     for entry in spec["mapping"].as_array().ok_or("missing `mapping`")? {
@@ -206,12 +209,15 @@ fn mixer(spec: &Value) -> Result<Mixer> {
             slot.push((count(&source["channel"])?, gain(source)?));
         }
     }
-    Ok(Mixer { outputs, mapping })
+    Ok(Mixer { inputs, outputs, mapping })
 }
 
 fn step(spec: &Value) -> Result<Step> {
     match text(spec, "type")? {
-        "Mixer" => Ok(Step::Mixer(text(spec, "name")?.into())),
+        "Mixer" => Ok(Step::Mixer(match spec["bypassed"].as_bool() {
+            Some(true) => None,
+            _ => Some(text(spec, "name")?.into()),
+        })),
         "Filter" => Ok(Step::Filter {
             channels: if spec["bypassed"].as_bool() == Some(true) {
                 Vec::new()
@@ -296,10 +302,17 @@ impl Pipeline {
     pub fn new(config: &Config, block: usize) -> Result<Pipeline> {
         let mut channels = config.capture_channels;
         let mut stages = Vec::new();
+        // One set of transformed taps per convolution filter.
+        let mut convolvers: HashMap<&str, Convolver> = HashMap::new();
         for step in &config.pipeline {
             match step {
-                Step::Mixer(name) => {
+                Step::Mixer(None) => {}
+                Step::Mixer(Some(name)) => {
                     let mixer = config.mixers.get(name).ok_or_else(|| format!("unknown mixer {name}"))?;
+                    // CamillaDSP refuses a mixer for another channel count.
+                    if mixer.inputs != channels {
+                        return Err(format!("mixer {name} takes {} channels, given {channels}", mixer.inputs).into());
+                    }
                     if let Some(source) = mixer.mapping.iter().flatten().find(|(input, _)| *input >= channels) {
                         return Err(format!("mixer {name} reads channel {} of {channels}", source.0).into());
                     }
@@ -317,7 +330,13 @@ impl Pipeline {
                                 Filter::Biquads(sections) => {
                                     chain.extend(sections.iter().map(|c| Processor::Biquad(Biquad::new(*c))));
                                 }
-                                Filter::Conv(taps) => chain.push(Processor::Conv(Box::new(Convolver::new(taps, block)))),
+                                Filter::Conv(taps) => {
+                                    let convolver = convolvers
+                                        .entry(name.as_str())
+                                        .or_insert_with(|| Convolver::new(taps, block))
+                                        .sibling();
+                                    chain.push(Processor::Conv(Box::new(convolver)));
+                                }
                                 Filter::Delay(samples) => chain.push(Processor::Delay(Delay::new(*samples))),
                                 Filter::Gain(gain) => chain.push(Processor::Gain(*gain)),
                             }
@@ -456,5 +475,25 @@ pipeline:
         let error = parse("filters:\n  x: Gain\n", &dir).err().unwrap().to_string();
         assert!(error.contains("SECS"), "{error}");
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    const SWAP: &str = "devices:\n  samplerate: 48000\n  capture: {\"channels\": 2}\nmixers:\n  \
+        swap: {\"channels\": {\"in\": IN, \"out\": 2}, \"mapping\": [{\"dest\": 0, \"sources\": [{\"channel\": 1, \"gain\": 0}]}, \
+        {\"dest\": 1, \"sources\": [{\"channel\": 0, \"gain\": 0}]}]}\npipeline:\n  - {\"type\": \"Mixer\", \"name\": \"swap\"BYPASS}\n";
+
+    #[test]
+    fn a_bypassed_mixer_does_nothing() {
+        let text = SWAP.replace("IN", "2").replace("BYPASS", ", \"bypassed\": true");
+        let mut pipeline = Pipeline::new(&parse(&text, Path::new(".")).unwrap(), 1).unwrap();
+        let mut channels = vec![vec![1.0], vec![2.0]];
+        pipeline.process(&mut channels);
+        assert_eq!(channels, [[1.0], [2.0]]);
+    }
+
+    #[test]
+    fn refuses_a_mixer_for_another_channel_count() {
+        let text = SWAP.replace("IN", "3").replace("BYPASS", "");
+        let error = Pipeline::new(&parse(&text, Path::new(".")).unwrap(), 1).err().unwrap().to_string();
+        assert!(error.contains("takes 3 channels"), "{error}");
     }
 }

@@ -48,6 +48,8 @@ impl Eac3 {
                     return Ok(());
                 }
                 Err(reason) => {
+                    // What OpenJOC held back from the unit before still plays.
+                    out.extend_from_slice(&self.scratch);
                     // Say so when the bed takes over, not at every retry.
                     if self.rejected == 0 {
                         eprintln!(

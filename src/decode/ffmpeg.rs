@@ -46,6 +46,8 @@ pub struct Ffmpeg {
     interleaved: Vec<f32>,
     /// Routing for the channel mask of the stream being decoded.
     bed: Option<(u64, BedMix)>,
+    /// The decoder has decoded a frame since it was opened.
+    decoded: bool,
 }
 
 impl Ffmpeg {
@@ -59,6 +61,7 @@ impl Ffmpeg {
             frame: frame::Audio::empty(),
             interleaved: Vec::new(),
             bed: None,
+            decoded: false,
         })
     }
 
@@ -91,8 +94,9 @@ impl Ffmpeg {
                 self.bed = Some((mask, bed));
             }
             self.interleave(channels)?;
+            self.decoded = true;
             if let Some((_, bed)) = &self.bed {
-                bed.mix(&self.interleaved, out);
+                bed.mix(&self.interleaved, channels, out);
             }
         }
         Ok(())
@@ -102,7 +106,7 @@ impl Ffmpeg {
     /// libavcodec recognises but does not render. It reports them as profiles
     /// this binding has no name for; every other DTS profile has one.
     pub fn is_dts_x(&self) -> bool {
-        self.id == Id::DTS && self.bed.is_some() && self.decoder.profile() == Profile::Unknown
+        self.id == Id::DTS && self.decoded && self.decoder.profile() == Profile::Unknown
     }
 
     /// Forgets the stream so far, for when it stops or changes.
@@ -112,6 +116,7 @@ impl Ffmpeg {
     pub fn reset(&mut self) {
         if let Ok(decoder) = open(self.id) {
             self.decoder = decoder;
+            self.decoded = false;
         }
     }
 
@@ -119,25 +124,36 @@ impl Ffmpeg {
         let samples = self.frame.samples();
         self.interleaved.clear();
         self.interleaved.resize(samples * channels, 0.0);
-        let frame = &self.frame;
-        let mut fill = |value: &dyn Fn(usize, usize) -> f32| {
-            for (index, sample) in self.interleaved.iter_mut().enumerate() {
-                *sample = value(index / channels, index % channels);
+        let (frame, out) = (&self.frame, &mut self.interleaved);
+        // Each plane is looked up once, not once a sample.
+        fn planar<T: Copy>(out: &mut [f32], planes: &[&[T]], convert: impl Fn(T) -> f32) {
+            let channels = planes.len();
+            for (c, plane) in planes.iter().enumerate() {
+                for (sample, value) in out.iter_mut().skip(c).step_by(channels).zip(plane.iter()) {
+                    *sample = convert(*value);
+                }
             }
-        };
+        }
+        fn packed<T: Copy>(out: &mut [f32], plane: &[T], convert: impl Fn(T) -> f32) {
+            for (sample, value) in out.iter_mut().zip(plane) {
+                *sample = convert(*value);
+            }
+        }
         match frame.format() {
-            Sample::F32(Type::Planar) => fill(&|i, c| frame.plane::<f32>(c)[i]),
-            Sample::F32(Type::Packed) => fill(&|i, c| frame.plane::<f32>(0)[i * channels + c]),
-            Sample::I32(Type::Planar) => fill(&|i, c| frame.plane::<i32>(c)[i] as f32 / I32_SCALE),
-            Sample::I32(Type::Packed) => {
-                fill(&|i, c| frame.plane::<i32>(0)[i * channels + c] as f32 / I32_SCALE);
+            Sample::F32(Type::Planar) => {
+                planar(out, &(0..channels).map(|c| frame.plane::<f32>(c)).collect::<Vec<_>>(), |v| v);
             }
+            Sample::F32(Type::Packed) => packed(out, frame.plane::<f32>(0), |v| v),
+            Sample::I32(Type::Planar) => {
+                let planes: Vec<_> = (0..channels).map(|c| frame.plane::<i32>(c)).collect();
+                planar(out, &planes, |v| v as f32 / I32_SCALE);
+            }
+            Sample::I32(Type::Packed) => packed(out, frame.plane::<i32>(0), |v| v as f32 / I32_SCALE),
             Sample::I16(Type::Planar) => {
-                fill(&|i, c| f32::from(frame.plane::<i16>(c)[i]) / I16_SCALE);
+                let planes: Vec<_> = (0..channels).map(|c| frame.plane::<i16>(c)).collect();
+                planar(out, &planes, |v| f32::from(v) / I16_SCALE);
             }
-            Sample::I16(Type::Packed) => {
-                fill(&|i, c| f32::from(frame.plane::<i16>(0)[i * channels + c]) / I16_SCALE);
-            }
+            Sample::I16(Type::Packed) => packed(out, frame.plane::<i16>(0), |v| f32::from(v) / I16_SCALE),
             other => return Err(format!("unsupported sample format {other:?}")),
         }
         Ok(())

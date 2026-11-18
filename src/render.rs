@@ -205,11 +205,14 @@ impl ObjectMix {
     }
 
     /// Moves an object to `target` gains, starting `delay` frames from now
-    /// and arriving `ramp` frames after that.
+    /// and arriving `ramp` frames after that. Updates queued for that time
+    /// or later came from older metadata, which this one supersedes.
     pub fn schedule(&mut self, object: usize, delay: u64, ramp: u32, target: Vec<f32>) {
         if let Some(object) = self.objects.get_mut(object) {
+            let at = self.clock + delay;
+            object.updates.retain(|update| update.at < at);
             object.updates.push_back(Update {
-                at: self.clock + delay,
+                at,
                 ramp,
                 target,
             });
@@ -286,9 +289,13 @@ impl BedMix {
         }
     }
 
-    /// Appends the mixed frames of interleaved `input` to `output`.
-    pub fn mix(&self, input: &[f32], output: &mut Vec<f32>) {
-        for frame in input.chunks_exact(self.routes.len()) {
+    /// Appends the mixed frames of interleaved `input`, `channels` to a
+    /// frame, to `output`. Channels beyond the named ones are dropped.
+    pub fn mix(&self, input: &[f32], channels: usize, output: &mut Vec<f32>) {
+        if channels == 0 {
+            return;
+        }
+        for frame in input.chunks_exact(channels) {
             let start = output.len();
             output.resize(start + self.output_count, 0.0);
             for (sample, route) in frame.iter().zip(&self.routes) {
@@ -305,8 +312,10 @@ impl BedMix {
 fn route(layout: &Layout, panner: &Panner, label: &str) -> Vec<(usize, f32)> {
     let name = canonical(label);
     if name == "LFE" {
-        let subs = layout.speakers.iter().enumerate().filter(|(_, s)| s.lfe);
-        return subs.map(|(index, _)| (index, 1.0)).collect();
+        // Each of N subwoofers plays 1/N, so together they sound like one.
+        let subs: Vec<usize> = layout.speakers.iter().enumerate().filter(|(_, s)| s.lfe).map(|(i, _)| i).collect();
+        let share = 1.0 / subs.len().max(1) as f32;
+        return subs.into_iter().map(|index| (index, share)).collect();
     }
     let named = |s: &crate::layout::Speaker| !s.lfe && canonical(&s.name) == name;
     if let Some(index) = layout.speakers.iter().position(named) {
@@ -486,7 +495,7 @@ mod tests {
     fn mixed(layout: &Layout, channels: &[&str], input: &[f32]) -> (Vec<f32>, Vec<String>) {
         let bed = BedMix::new(layout, &Panner::new(layout), channels);
         let mut output = Vec::new();
-        bed.mix(input, &mut output);
+        bed.mix(input, channels.len(), &mut output);
         (output, bed.dropped)
     }
 
@@ -565,6 +574,36 @@ mod tests {
         let gains = panner.room_gains([-0.5, 0.0, 0.0]);
         assert!(gains[6] > 2.0 * gains[7] && gains[7] > 0.0, "{gains:?}");
         assert!((power(&gains) - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_bed_short_of_names_drops_the_rest_and_keeps_its_frames() {
+        let stereo = layout(&[("FL", -30.0, 0.0), ("FR", 30.0, 0.0)]);
+        let bed = BedMix::new(&stereo, &Panner::new(&stereo), &["FL"]);
+        let mut output = Vec::new();
+        bed.mix(&[1.0, 9.0, 2.0, 9.0], 2, &mut output);
+        assert_eq!(output, [1.0, 0.0, 2.0, 0.0]);
+        let none = BedMix::new(&stereo, &Panner::new(&stereo), &[]);
+        // No names: the frame still comes out, silent, instead of a panic.
+        none.mix(&[1.0, 2.0], 2, &mut output);
+        assert_eq!(output, [1.0, 0.0, 2.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn two_subwoofers_share_the_lfe() {
+        let two = layout(&[("FL", -30.0, 0.0), ("LFE", 0.0, 0.0), ("LFE", 0.0, 0.0)]);
+        let (output, _) = mixed(&two, &["LFE"], &[1.0]);
+        assert_eq!(output, [0.0, 0.5, 0.5]);
+    }
+
+    #[test]
+    fn newer_metadata_supersedes_later_updates() {
+        let mut mix = ObjectMix::new(1, 1);
+        mix.schedule(0, 6, 0, vec![0.25]);
+        mix.schedule(0, 2, 0, vec![1.0]);
+        let mut out = Vec::new();
+        mix.mix(&[1.0; 8], 1, &mut out);
+        assert_eq!(out, [0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
     }
 
     #[test]

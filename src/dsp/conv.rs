@@ -12,8 +12,9 @@ pub struct Convolver {
     block: usize,
     forward: Arc<dyn RealToComplex<f64>>,
     inverse: Arc<dyn ComplexToReal<f64>>,
-    /// Spectrum of each partition, scaled for the unnormalized inverse.
-    partitions: Vec<Vec<Complex<f64>>>,
+    /// Spectrum of each partition, scaled for the unnormalized inverse;
+    /// shared by the convolvers of one filter.
+    partitions: Arc<Vec<Vec<Complex<f64>>>>,
     /// Spectra of the latest inputs; `spectra[newest]` is the current one.
     spectra: Vec<Vec<Complex<f64>>>,
     newest: usize,
@@ -42,18 +43,32 @@ impl Convolver {
                 spectrum
             })
             .collect();
-        let spectra = vec![forward.make_output_vec(); partitions.len().max(1)];
+        Self::with(forward, inverse, Arc::new(partitions), block)
+    }
+
+    fn with(
+        forward: Arc<dyn RealToComplex<f64>>,
+        inverse: Arc<dyn ComplexToReal<f64>>,
+        partitions: Arc<Vec<Vec<Complex<f64>>>>,
+        block: usize,
+    ) -> Self {
         Convolver {
             block,
             sum: forward.make_output_vec(),
+            spectra: vec![forward.make_output_vec(); partitions.len().max(1)],
             forward,
             inverse,
             partitions,
-            spectra,
             newest: 0,
             window: vec![0.0; 2 * block],
             time: vec![0.0; 2 * block],
         }
+    }
+
+    /// A convolver with the same taps and its own state, without
+    /// transforming the taps again.
+    pub fn sibling(&self) -> Self {
+        Self::with(Arc::clone(&self.forward), Arc::clone(&self.inverse), Arc::clone(&self.partitions), self.block)
     }
 
     /// Convolves one block of exactly `block` samples in place.
@@ -129,6 +144,21 @@ mod tests {
         check(64, 64);
         check(700, 64);
         check(1000, 128);
+    }
+
+    #[test]
+    fn a_sibling_convolves_alike_from_its_own_state() {
+        let taps = noise(300, 4);
+        let input = noise(64 * 8, 5);
+        let mut first = Convolver::new(&taps, 64);
+        let mut warm = input.clone();
+        warm.chunks_mut(64).for_each(|chunk| first.process(chunk));
+        let mut second = first.sibling();
+        let mut fresh = Convolver::new(&taps, 64);
+        let (mut a, mut b) = (input.clone(), input);
+        a.chunks_mut(64).for_each(|chunk| second.process(chunk));
+        b.chunks_mut(64).for_each(|chunk| fresh.process(chunk));
+        assert_eq!(a, b);
     }
 
     #[test]

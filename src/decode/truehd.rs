@@ -53,7 +53,11 @@ impl TrueHd {
         self.extractor.push_bytes(&self.stream);
         let result = self.drain(layout, panner, out);
         if result.is_err() {
+            // The objects and their scheduled movement, and the bed's routing,
+            // stay: a damaged unit does not change what the stream carries.
+            let (bed, objects) = (self.bed.take(), self.objects.take());
             self.reset();
+            (self.bed, self.objects) = (bed, objects);
         }
         result
     }
@@ -112,7 +116,7 @@ impl TrueHd {
             if let Some(objects) = &mut self.objects {
                 objects.mix(&self.interleaved, decoded.channel_count, out);
             } else if let Some((_, bed)) = &self.bed {
-                bed.mix(&self.interleaved, out);
+                bed.mix(&self.interleaved, decoded.channel_count, out);
             }
         }
         Ok(())
