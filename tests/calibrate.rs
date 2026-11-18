@@ -9,7 +9,11 @@
 //!
 //! Ignored by default: it measures in real time and designs for minutes.
 //! Run it natively; under qemu the simulated room falls behind real time,
-//! the microphone lags and the measurement goes wrong.
+//! the microphone lags and the measurement goes wrong. In a virtual machine,
+//! keep the multicast on loopback (`--network none`, then `ip link set lo
+//! multicast on; ip route add 224.0.0.0/4 dev lo`): sent out through the
+//! machine's network, sends can stall past 100 ms and the sender refuses
+//! the measurement. A measurement it refuses is tried again.
 
 use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
@@ -38,6 +42,23 @@ fn room(output: usize) -> (usize, f32) {
 fn atmos67(args: &[&str]) {
     let status = Command::new(BIN).args(args).status().unwrap();
     assert!(status.success(), "atmos67 {args:?}");
+}
+
+/// Runs a step that plays a signal, again when the sender reports a gap in
+/// it: the sender's 1 ms loop can be held up past 100 ms by the machine
+/// (a virtual machine's host, say), and the step refuses what it measured.
+fn atmos67_playing(args: &[&str]) {
+    const ATTEMPTS: usize = 5;
+    for attempt in 1..=ATTEMPTS {
+        let output = Command::new(BIN).args(args).stderr(Stdio::piped()).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        eprint!("{stderr}");
+        if output.status.success() {
+            return;
+        }
+        assert!(stderr.contains("fell behind the clock") && attempt < ATTEMPTS, "atmos67 {args:?}");
+        eprintln!("the sender fell behind; attempt {} of {ATTEMPTS}", attempt + 1);
+    }
 }
 
 /// `O_NONBLOCK` on Linux, which the test does not take libc for.
@@ -149,7 +170,7 @@ fn calibrates_a_simulated_room() {
         "--capture-command", &capture,
     ];
     atmos67(&[&["calibrate", "start", "--layout", "7.1.4", "--subs", "2"][..], &common].concat());
-    atmos67(&[&["calibrate", "measure", "--position", "1"][..], &common].concat());
+    atmos67_playing(&[&["calibrate", "measure", "--position", "1"][..], &common].concat());
 
     // The room delays L by 96 samples (2 ms); the simulation hands the
     // microphone on a packet or so later than a real one would.
