@@ -956,8 +956,8 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "openjoc-api"
-version = "0.20.2"
-source = "git+https://github.com/chyinan/OpenJOC?tag=v0.20.2#f9b54bbbb8e1b44c746a72e1b14b289cad418cf9"
+version = "0.20.1"
+source = "git+https://github.com/chyinan/OpenJOC?rev=893425751b7800632e8826d05bdef649e01faea6#893425751b7800632e8826d05bdef649e01faea6"
 dependencies = [
  "openjoc-eac3",
  "openjoc-emdf",
@@ -971,13 +971,13 @@ dependencies = [
 
 [[package]]
 name = "openjoc-bitio"
-version = "0.20.2"
-source = "git+https://github.com/chyinan/OpenJOC?tag=v0.20.2#f9b54bbbb8e1b44c746a72e1b14b289cad418cf9"
+version = "0.20.1"
+source = "git+https://github.com/chyinan/OpenJOC?rev=893425751b7800632e8826d05bdef649e01faea6#893425751b7800632e8826d05bdef649e01faea6"
 
 [[package]]
 name = "openjoc-eac3"
-version = "0.20.2"
-source = "git+https://github.com/chyinan/OpenJOC?tag=v0.20.2#f9b54bbbb8e1b44c746a72e1b14b289cad418cf9"
+version = "0.20.1"
+source = "git+https://github.com/chyinan/OpenJOC?rev=893425751b7800632e8826d05bdef649e01faea6#893425751b7800632e8826d05bdef649e01faea6"
 dependencies = [
  "openjoc-bitio",
  "openjoc-emdf",
@@ -986,16 +986,16 @@ dependencies = [
 
 [[package]]
 name = "openjoc-emdf"
-version = "0.20.2"
-source = "git+https://github.com/chyinan/OpenJOC?tag=v0.20.2#f9b54bbbb8e1b44c746a72e1b14b289cad418cf9"
+version = "0.20.1"
+source = "git+https://github.com/chyinan/OpenJOC?rev=893425751b7800632e8826d05bdef649e01faea6#893425751b7800632e8826d05bdef649e01faea6"
 dependencies = [
  "openjoc-bitio",
 ]
 
 [[package]]
 name = "openjoc-joc"
-version = "0.20.2"
-source = "git+https://github.com/chyinan/OpenJOC?tag=v0.20.2#f9b54bbbb8e1b44c746a72e1b14b289cad418cf9"
+version = "0.20.1"
+source = "git+https://github.com/chyinan/OpenJOC?rev=893425751b7800632e8826d05bdef649e01faea6#893425751b7800632e8826d05bdef649e01faea6"
 dependencies = [
  "num-complex",
  "openjoc-bitio",
@@ -1005,8 +1005,8 @@ dependencies = [
 
 [[package]]
 name = "openjoc-oamd"
-version = "0.20.2"
-source = "git+https://github.com/chyinan/OpenJOC?tag=v0.20.2#f9b54bbbb8e1b44c746a72e1b14b289cad418cf9"
+version = "0.20.1"
+source = "git+https://github.com/chyinan/OpenJOC?rev=893425751b7800632e8826d05bdef649e01faea6#893425751b7800632e8826d05bdef649e01faea6"
 dependencies = [
  "openjoc-bitio",
  "serde",
@@ -1015,24 +1015,24 @@ dependencies = [
 
 [[package]]
 name = "openjoc-qmf"
-version = "0.20.2"
-source = "git+https://github.com/chyinan/OpenJOC?tag=v0.20.2#f9b54bbbb8e1b44c746a72e1b14b289cad418cf9"
+version = "0.20.1"
+source = "git+https://github.com/chyinan/OpenJOC?rev=893425751b7800632e8826d05bdef649e01faea6#893425751b7800632e8826d05bdef649e01faea6"
 dependencies = [
  "num-complex",
 ]
 
 [[package]]
 name = "openjoc-render"
-version = "0.20.2"
-source = "git+https://github.com/chyinan/OpenJOC?tag=v0.20.2#f9b54bbbb8e1b44c746a72e1b14b289cad418cf9"
+version = "0.20.1"
+source = "git+https://github.com/chyinan/OpenJOC?rev=893425751b7800632e8826d05bdef649e01faea6#893425751b7800632e8826d05bdef649e01faea6"
 dependencies = [
  "rustfft",
 ]
 
 [[package]]
 name = "openjoc-scene"
-version = "0.20.2"
-source = "git+https://github.com/chyinan/OpenJOC?tag=v0.20.2#f9b54bbbb8e1b44c746a72e1b14b289cad418cf9"
+version = "0.20.1"
+source = "git+https://github.com/chyinan/OpenJOC?rev=893425751b7800632e8826d05bdef649e01faea6#893425751b7800632e8826d05bdef649e01faea6"
 dependencies = [
  "openjoc-joc",
  "openjoc-oamd",
@@ -1042,8 +1042,8 @@ dependencies = [
 
 [[package]]
 name = "openjoc-sofa"
-version = "0.20.2"
-source = "git+https://github.com/chyinan/OpenJOC?tag=v0.20.2#f9b54bbbb8e1b44c746a72e1b14b289cad418cf9"
+version = "0.20.1"
+source = "git+https://github.com/chyinan/OpenJOC?rev=893425751b7800632e8826d05bdef649e01faea6#893425751b7800632e8826d05bdef649e01faea6"
 dependencies = [
  "hdf5-pure",
  "openjoc-render",
