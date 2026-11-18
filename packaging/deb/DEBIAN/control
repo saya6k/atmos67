@@ -4,7 +4,7 @@ Architecture: armhf
 Maintainer: atmos67
 Section: sound
 Priority: optional
-Depends: libc6 (>= 2.31), libgcc-s1, alsa-utils, linuxptp, ethtool
+Depends: libc6 (>= 2.31), libgcc-s1, alsa-utils (= 1.2.4-1), linuxptp (= 3.1-2.1), ethtool (= 1:5.9-1)
 Description: Kodi passthrough audio to per-speaker AES67 streams
  Decodes the bitstreams Kodi passes through to an ALSA loopback device
  (Dolby Digital, Dolby Digital Plus and TrueHD with Atmos, DTS) for an
