@@ -10,6 +10,10 @@
 //! The streams never stop: while stdin has nothing to play they carry
 //! silence, so receivers stay locked between titles.
 //!
+//! The sender ends when stdin does: it plays out what it holds, withdraws
+//! its streams with SAP deletions and exits. The service stops it that
+//! way, by ending its input, rather than by a signal.
+//!
 //! A SECS 2R design, when given, corrects the speakers before they are sent
 //! and may add subwoofer channels. The volume is applied to each packet as it
 //! leaves, ramped across the packet, so a change is heard at once without a
@@ -280,8 +284,7 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
     // The least the queue held while playing in the current window.
     let (mut lowest, mut window) = (usize::MAX, 0u32);
     let mut next = ptp_samples(SystemTime::now());
-    stop_on_signals();
-    while !STOP.load(Ordering::Relaxed) {
+    loop {
         let now = ptp_samples(SystemTime::now());
         if now.abs_diff(next) > MAX_CLOCK_ERROR {
             let ms = (now as f64 - next as f64) * 1000.0 / RATE as f64;
@@ -600,22 +603,6 @@ fn rtp_packet(
         }
     }
     packet
-}
-
-/// Set by SIGTERM or SIGINT: the sender stops and withdraws its streams.
-static STOP: AtomicBool = AtomicBool::new(false);
-
-extern "C" fn stop(_: libc::c_int) {
-    STOP.store(true, Ordering::Relaxed);
-}
-
-fn stop_on_signals() {
-    let handler = stop as extern "C" fn(libc::c_int) as libc::sighandler_t;
-    // SAFETY: the handler only stores to an atomic, which is async-signal-safe.
-    unsafe {
-        libc::signal(libc::SIGTERM, handler);
-        libc::signal(libc::SIGINT, handler);
-    }
 }
 
 /// FNV-1a of `bytes`, in 62 bits, as some SDP parsers read numbers signed.
