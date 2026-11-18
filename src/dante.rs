@@ -60,11 +60,14 @@ pub fn discover(wait: Duration) -> Result<Vec<Device>> {
         let ServiceEvent::ServiceResolved(service) = event else { continue };
         let fullname = service.get_fullname();
         let name = fullname.strip_suffix(&suffix).unwrap_or(fullname).to_string();
+        // Routable addresses first; without DHCP Dante devices have only a
+        // link-local one. The lowest otherwise, so the choice is the same each time.
         let Some(ipv4) = service
             .get_addresses_v4()
             .into_iter()
             .map(|address| address.to_owned())
-            .find(|address: &Ipv4Addr| !address.is_unspecified() && !address.is_link_local())
+            .filter(|address: &Ipv4Addr| !address.is_unspecified())
+            .min_by_key(|address| (address.is_link_local(), *address))
         else {
             continue;
         };
@@ -99,10 +102,25 @@ fn client(device: &Device) -> Result<Client> {
 }
 
 /// Turns AES67 mode on or off. Dante devices apply it after a reboot.
+/// netaudio sends the command without waiting for an answer, so the
+/// configured setting is read back to confirm the device took it.
 pub fn set_aes67(device: &Device, enabled: bool) -> Result<()> {
     let command = json!({ "command": "enable_aes67", "enabled": enabled }).to_string();
-    client(device)?.execute(&command).map_err(|e| failed(device, e))?;
-    Ok(())
+    let mut client = client(device)?;
+    client.execute(&command).map_err(|e| failed(device, e))?;
+    let mut configured = None;
+    for _ in 0..ATTEMPTS {
+        std::thread::sleep(Duration::from_millis(300));
+        configured = client.get_aes67_configured().map_err(|e| failed(device, e))?;
+        if configured == Some(enabled) {
+            return Ok(());
+        }
+    }
+    Err(match configured {
+        Some(_) => format!("{} still has AES67 {}", device.name, if enabled { "off" } else { "on" }),
+        None => format!("{} does not report its AES67 setting", device.name),
+    }
+    .into())
 }
 
 /// The subscription request for `flow` onto receiver channels from
@@ -149,6 +167,8 @@ pub fn subscribe(device: &Device, flow: &Flow, first_channel: u16) -> Result<()>
 /// The stream called `name`, from the status of the sender at `control`.
 pub fn flow(control: &Path, name: &str) -> Result<Flow> {
     let mut socket = UnixStream::connect(control).map_err(|e| format!("sender control {}: {e}", control.display()))?;
+    socket.set_read_timeout(Some(Duration::from_secs(5)))?;
+    socket.set_write_timeout(Some(Duration::from_secs(5)))?;
     socket.write_all(b"status\n")?;
     let mut answer = String::new();
     BufReader::new(&socket).read_line(&mut answer)?;

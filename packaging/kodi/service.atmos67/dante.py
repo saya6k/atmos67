@@ -20,7 +20,11 @@ def text(string_id, *args):
 
 def dante(args):
     """Runs `atmos67 dante …`; its JSON lines, or None after showing the error."""
-    result = subprocess.run([ATMOS67, "dante"] + args, capture_output=True, text=True)
+    try:
+        result = subprocess.run([ATMOS67, "dante"] + args, capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        xbmcgui.Dialog().ok(text(32160), text(32166) + "\ntimed out")
+        return None
     if result.returncode != 0:
         xbmcgui.Dialog().ok(text(32160), text(32166) + "\n" + result.stderr.strip()[-400:])
         return None

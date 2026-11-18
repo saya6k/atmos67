@@ -173,7 +173,7 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
         std::net::IpAddr::V4(ip) => ip,
         std::net::IpAddr::V6(_) => return Err("no IPv4 source address".into()),
     };
-    let session = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos() as u64
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos() as u64
         ^ u64::from(std::process::id()) << 32;
 
     let mut streams = Vec::new();
@@ -184,6 +184,7 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
         }
         let socket = UdpSocket::bind((source, 0))?;
         socket.set_multicast_ttl_v4(TTL)?;
+        let session = session_id(&name, address);
         let carried: Vec<&str> = map.iter().map(|&c| names.get(c).map_or("?", String::as_str)).collect();
         eprintln!("atmos67: sending {name} [{}] to {address}:{RTP_PORT} from {source}", carried.join(" "));
         described.push(serde_json::json!({
@@ -191,16 +192,16 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
             "address": address.to_string(),
             "port": RTP_PORT,
             // The SDP origin's session ID, which identifies the stream to receivers.
-            "session": (session + index as u64).to_string(),
+            "session": session.to_string(),
             "channels": carried,
         }));
         streams.push(Stream {
             socket,
             destination: SocketAddrV4::new(address, RTP_PORT),
             channels: map.clone(),
-            ssrc: (session >> 16) as u32 ^ index as u32,
+            ssrc: (nonce >> 16) as u32 ^ index as u32,
             sequence: 0,
-            sdp: sdp(&name, session + index as u64, source, address, map.len(), config),
+            sdp: sdp(&name, session, source, address, map.len(), config),
         });
     }
 
@@ -542,6 +543,15 @@ fn rtp_packet(
     packet
 }
 
+/// The SDP session ID of the stream `name` sent to `address`. Receivers
+/// such as Dante keep their subscriptions by it, so it stays the same
+/// across restarts (FNV-1a of both; 62 bits, as some parsers read it signed).
+fn session_id(name: &str, address: Ipv4Addr) -> u64 {
+    let bytes = name.bytes().chain(address.octets());
+    bytes.fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3))
+        >> 2
+}
+
 /// The session description aes67-linux-daemon publishes for such a stream.
 fn sdp(
     name: &str,
@@ -597,6 +607,14 @@ mod tests {
             packet[12..],
             [0x7F, 0xFF, 0xFF, 0x80, 0x00, 0x01, 0x40, 0x00, 0x00, 0x7F, 0xFF, 0xFF]
         );
+    }
+
+    #[test]
+    fn session_ids_survive_restarts_and_differ_between_streams() {
+        let address = Ipv4Addr::new(239, 69, 67, 1);
+        assert_eq!(session_id("atmos67 ch 1-8", address), session_id("atmos67 ch 1-8", address));
+        assert_ne!(session_id("atmos67 ch 1-8", address), session_id("atmos67 ch 9-12", address));
+        assert_ne!(session_id("atmos67 ch 1-8", address), session_id("atmos67 ch 1-8", Ipv4Addr::new(239, 69, 67, 2)));
     }
 
     #[test]
