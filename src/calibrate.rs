@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use secs::types::ipc::{
     CalibrateParams, ConfigIndexParams, ConfigSubCountParams, ExportKind, ExportParams,
-    JobEvent, MeasureConfigureParams, MeasurePositionParams, MicCalibrationSetParams, ProjectNewParams,
+    JobEvent, JobStatus, MeasureConfigureParams, MeasurePositionParams, MicCalibrationSetParams, ProjectNewParams,
     ProjectPathParams, ProjectSaveParams,
 };
 use secs::{Engine, EngineBuilder, Request, Response, Secs};
@@ -77,7 +77,12 @@ fn job(engine: &Engine, request: Request) -> Result<()> {
         other => return Err(format!("unexpected SECS 2R response {other:?}").into()),
     };
     match engine.wait_job(job, JOB_TIMEOUT).map_err(|e| format!("SECS 2R: {e}"))? {
-        JobEvent::Finished { .. } => Ok(()),
+        // A job that ends badly ends with Finished too; its status says how.
+        JobEvent::Finished { status: JobStatus::Succeeded, .. } => Ok(()),
+        JobEvent::Finished { status, error, .. } => {
+            let detail = error.map(|e| format!(": {}", e.detail)).unwrap_or_default();
+            Err(format!("SECS 2R job {status:?}{detail}").into())
+        }
         other => Err(format!("SECS 2R job ended with {other:?}").into()),
     }
 }

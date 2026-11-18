@@ -117,8 +117,11 @@ struct Measurement {
     packets: VecDeque<Vec<f32>>,
     /// PTP time, in samples, the first packet was sent at.
     started: Option<u64>,
-    /// Told the start when the last packet has been sent.
-    done: Option<mpsc::Sender<u64>>,
+    /// Told the start when the last packet has been sent, or why the
+    /// signal did not go out whole.
+    done: Option<mpsc::Sender<Result<u64, String>>>,
+    /// The timeline restarted while the signal was going out.
+    broken: bool,
 }
 
 /// A stream to send: its name, multicast address and output channels.
@@ -281,6 +284,13 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
     while !STOP.load(Ordering::Relaxed) {
         let now = ptp_samples(SystemTime::now());
         if now.abs_diff(next) > MAX_CLOCK_ERROR {
+            let ms = (now as f64 - next as f64) * 1000.0 / RATE as f64;
+            eprintln!("atmos67: the timeline was {ms:.0} ms off the clock; restarted from it");
+            // A measurement signal with a gap in it measures the gap.
+            let mut measurement = measurement.lock().expect("control does not panic");
+            if measurement.started.is_some() {
+                measurement.broken = true;
+            }
             next = now;
         }
         if next > now {
@@ -322,8 +332,20 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
             if packet.is_some() && measurement.started.is_none() {
                 measurement.started = Some(next);
             }
+            if packet.is_none() {
+                measurement.broken = false;
+            }
             let last = packet.is_some() && measurement.packets.is_empty();
-            let finished = if last { measurement.done.take().zip(measurement.started.take()) } else { None };
+            let finished = if last {
+                let started = measurement.started.take();
+                let result = match (std::mem::take(&mut measurement.broken), started) {
+                    (true, _) | (_, None) => Err("the sender fell behind the clock while playing; play again".to_string()),
+                    (false, Some(started)) => Ok(started),
+                };
+                measurement.done.take().map(|done| (done, result))
+            } else {
+                None
+            };
             (packet, finished)
         };
         status.playing.store(packet.is_some(), Ordering::Relaxed);
@@ -364,8 +386,8 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
                 }
             }
         }
-        if let Some((done, started)) = finished {
-            let _ = done.send(started);
+        if let Some((done, result)) = finished {
+            let _ = done.send(result);
         }
         next += PACKET_FRAMES as u64;
     }
@@ -460,8 +482,9 @@ fn play(
         }
         measurement.started = None;
         measurement.done = Some(done);
+        measurement.broken = false;
     }
-    finished.recv().map(|started| started.to_string()).map_err(|_| "the sender stopped".to_string())
+    finished.recv().map_err(|_| "the sender stopped".to_string())?.map(|started| started.to_string())
 }
 
 /// Scales `samples` from `from` to `to` across the packet, frame by frame.
