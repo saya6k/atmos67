@@ -158,6 +158,7 @@ sudo apt install ./atmos67_0.1.0_armhf.deb     # Vero V에서. alsa-utils, linux
 2. 애드온 설정에서 스피커 배치 프리셋, 네트워크 인터페이스, 멀티캐스트 주소, PTP 도메인을 고릅니다. 바꾸면 서비스가 다시 시작됩니다. 실제 위치와 거리는 측정 보정이 맞추므로 배치 파일은 애드온에서 고르지 않습니다(설정 파일의 `LAYOUT_FILE`로는 쓸 수 있습니다).
    - "스트림 구성"에서 어느 스피커를 어느 스트림(이름, 멀티캐스트 주소, 최대 8채널)에 넣을지 정합니다. 수신기마다 필요한 채널만 받게 할 수 있고, 스트림 이름이 수신기(예: Dante Controller)에 보이는 이름입니다. 정하지 않으면 순서대로 8채널씩 보냅니다.
    - "상태 보기"는 서비스, 보정 모드, PTP 그랜드마스터, 재생 여부, 볼륨, 지연, 송출 오류, 스트림 구성을 보여 줍니다.
+   - "Dante 수신기 연결"은 네트워크의 Dante 장비를 찾아 AES67 모드를 켜거나 끄고(장비 재부팅 후 적용), 스트림을 수신기의 N번 채널부터 차례로 구독시킵니다. Dante Controller에서 하는 일과 같으며, 명령줄로는 `atmos67 dante list | aes67 | connect`입니다. Dante의 제어 프로토콜은 비공개라 [netaudio](https://github.com/chris-ritsen/network-audio-controller)의 역분석 구현(`netaudio-core`, Unlicense)을 씁니다. **Dante 장비에서는 아직 시험하지 못했습니다.** 동작하지 않으면 Dante Controller로 같은 이름의 스트림을 구독하면 됩니다. Dante 장비는 구독을 저장해 두므로 한 번이면 됩니다.
 3. 애드온 설정의 "Kodi 오디오 출력을 atmos67로 설정"을 실행합니다. 오디오 출력과 패스스루 장치를 `atmos67 (AES67)`로 바꾸고, 스피커 수를 2.0으로, 모든 포맷의 패스스루와 Dolby Digital 트랜스코딩을 켭니다. Kodi를 다시 시작해야 장치가 목록에 나타날 수 있습니다.
 
 애드온 없이 쓰려면 `/etc/atmos67/atmos67.conf`를 고치고 `sudo systemctl restart atmos67`을 합니다.

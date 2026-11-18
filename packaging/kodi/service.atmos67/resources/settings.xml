@@ -80,6 +80,13 @@
             <close>true</close>
           </control>
         </setting>
+        <setting id="dante" type="action" label="32038" help="32039">
+          <level>0</level>
+          <data>RunScript(special://home/addons/service.atmos67/dante.py)</data>
+          <control type="button" format="action">
+            <close>true</close>
+          </control>
+        </setting>
       </group>
     </category>
     <category id="bass" label="32004">

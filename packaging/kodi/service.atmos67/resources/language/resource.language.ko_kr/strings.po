@@ -411,3 +411,55 @@ msgstr "송출 오류: %s"
 msgctxt "#32151"
 msgid "Streams from %s:"
 msgstr "%s에서 보내는 스트림:"
+
+msgctxt "#32038"
+msgid "Dante receivers"
+msgstr "Dante 수신기 연결"
+
+msgctxt "#32039"
+msgid "Finds Dante devices on the network, turns on their AES67 mode and subscribes them to a stream, as Dante Controller would."
+msgstr "네트워크의 Dante 장비를 찾아 AES67 모드를 켜고 스트림을 구독시킵니다. Dante Controller에서 하는 일과 같습니다."
+
+msgctxt "#32160"
+msgid "Dante receivers"
+msgstr "Dante 수신기"
+
+msgctxt "#32161"
+msgid "Looking for Dante devices"
+msgstr "Dante 장비를 찾는 중"
+
+msgctxt "#32162"
+msgid "No Dante device answered. It has to be on the same network as the Vero V."
+msgstr "응답한 Dante 장비가 없습니다. Vero V와 같은 네트워크에 있어야 합니다."
+
+msgctxt "#32163"
+msgid "Stream to receive"
+msgstr "받을 스트림"
+
+msgctxt "#32164"
+msgid "First receiver channel"
+msgstr "수신기의 첫 채널 번호"
+
+msgctxt "#32165"
+msgid "%s goes to %s, channels %d to %d."
+msgstr "%s 스트림을 %s의 %d~%d번 채널로 받게 했습니다."
+
+msgctxt "#32166"
+msgid "The Dante device did not take it:"
+msgstr "Dante 장비가 받아들이지 않았습니다:"
+
+msgctxt "#32167"
+msgid "Subscribe to a stream"
+msgstr "스트림 연결"
+
+msgctxt "#32168"
+msgid "Turn AES67 mode on"
+msgstr "AES67 모드 켜기"
+
+msgctxt "#32169"
+msgid "Turn AES67 mode off"
+msgstr "AES67 모드 끄기"
+
+msgctxt "#32170"
+msgid "Done. Reboot the Dante device for the change to take effect."
+msgstr "바꿨습니다. Dante 장비를 재부팅해야 적용됩니다."

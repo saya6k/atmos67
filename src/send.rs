@@ -186,7 +186,14 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
         socket.set_multicast_ttl_v4(TTL)?;
         let carried: Vec<&str> = map.iter().map(|&c| names.get(c).map_or("?", String::as_str)).collect();
         eprintln!("atmos67: sending {name} [{}] to {address}:{RTP_PORT} from {source}", carried.join(" "));
-        described.push(serde_json::json!({ "name": name, "address": address.to_string(), "channels": carried }));
+        described.push(serde_json::json!({
+            "name": name,
+            "address": address.to_string(),
+            "port": RTP_PORT,
+            // The SDP origin's session ID, which identifies the stream to receivers.
+            "session": (session + index as u64).to_string(),
+            "channels": carried,
+        }));
         streams.push(Stream {
             socket,
             destination: SocketAddrV4::new(address, RTP_PORT),

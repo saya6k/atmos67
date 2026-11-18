@@ -4,6 +4,7 @@
 
 mod aes67;
 mod calibrate;
+mod dante;
 mod decode;
 mod dsp;
 mod iec61937;
@@ -41,7 +42,10 @@ const USAGE: &str = "usage: atmos67 (--layout PRESET | --layout-file LAYOUT.json
        atmos67 calibrate start (--layout PRESET | --layout-file LAYOUT.json) --subs N --project DIR --control SOCKET --mic ALSA_DEVICE [--mic-cal FILE]
        atmos67 calibrate measure --project DIR --control SOCKET --mic ALSA_DEVICE --position N
        atmos67 calibrate finish --project DIR --control SOCKET --mic ALSA_DEVICE --out DIR
-       atmos67 calibrate latency --control SOCKET --mic ALSA_DEVICE [--channel N]";
+       atmos67 calibrate latency --control SOCKET --mic ALSA_DEVICE [--channel N]
+       atmos67 dante list [--seconds N]
+       atmos67 dante aes67 --device NAME [--off]
+       atmos67 dante connect --device NAME --stream STREAM --control SOCKET [--first-channel N]";
 
 const OUTPUT_RATE: u64 = 48_000;
 
@@ -57,6 +61,9 @@ const GAP_FRAMES: u64 = 1536 * 3 / 2;
 fn main() -> Result<(), Box<dyn Error>> {
     if std::env::args().nth(1).as_deref() == Some("calibrate") {
         return calibration(std::env::args().skip(2));
+    }
+    if std::env::args().nth(1).as_deref() == Some("dante") {
+        return dante_command(std::env::args().skip(2));
     }
     let mut speakers = None;
     let mut input_channels = 2usize;
@@ -366,4 +373,51 @@ fn calibration(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn Err
         "finish" => calibrate::finish(&options, &out.ok_or(USAGE)?),
         _ => Err(USAGE.into()),
     }
+}
+
+/// `atmos67 dante STEP …`: Dante receivers; see `dante`. Prints one JSON
+/// object per line.
+fn dante_command(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn Error>> {
+    let step = args.next().ok_or(USAGE)?;
+    let (mut device, mut stream, mut control, mut first, mut seconds, mut on) = (None, None, None, 1u16, 3u64, true);
+    while let Some(flag) = args.next() {
+        let mut value = || args.next().ok_or(USAGE);
+        match flag.as_str() {
+            "--device" => device = Some(value()?),
+            "--stream" => stream = Some(value()?),
+            "--control" => control = Some(std::path::PathBuf::from(value()?)),
+            "--first-channel" => first = value()?.parse()?,
+            "--seconds" => seconds = value()?.parse()?,
+            "--off" => on = false,
+            _ => return Err(USAGE.into()),
+        }
+    }
+    let wait = std::time::Duration::from_secs(seconds);
+    match step.as_str() {
+        "list" => {
+            for found in dante::discover(wait)? {
+                println!(
+                    "{}",
+                    serde_json::json!({ "name": found.name, "ipv4": found.ipv4.to_string(), "port": found.port,
+                                        "protocol": found.protocol_version })
+                );
+            }
+        }
+        "aes67" => {
+            let found = dante::find(&device.ok_or(USAGE)?, wait)?;
+            dante::set_aes67(&found, on)?;
+            println!("{}", serde_json::json!({ "device": found.name, "aes67": on, "note": "takes effect after the device reboots" }));
+        }
+        "connect" => {
+            let flow = dante::flow(&control.ok_or(USAGE)?, &stream.clone().ok_or(USAGE)?)?;
+            let found = dante::find(&device.ok_or(USAGE)?, wait)?;
+            dante::subscribe(&found, &flow, first)?;
+            println!(
+                "{}",
+                serde_json::json!({ "device": found.name, "stream": stream, "first_channel": first, "channels": flow.channels })
+            );
+        }
+        _ => return Err(USAGE.into()),
+    }
+    Ok(())
 }

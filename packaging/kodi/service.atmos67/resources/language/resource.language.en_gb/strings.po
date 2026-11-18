@@ -411,3 +411,55 @@ msgstr ""
 msgctxt "#32151"
 msgid "Streams from %s:"
 msgstr ""
+
+msgctxt "#32038"
+msgid "Dante receivers"
+msgstr ""
+
+msgctxt "#32039"
+msgid "Finds Dante devices on the network, turns on their AES67 mode and subscribes them to a stream, as Dante Controller would."
+msgstr ""
+
+msgctxt "#32160"
+msgid "Dante receivers"
+msgstr ""
+
+msgctxt "#32161"
+msgid "Looking for Dante devices"
+msgstr ""
+
+msgctxt "#32162"
+msgid "No Dante device answered. It has to be on the same network as the Vero V."
+msgstr ""
+
+msgctxt "#32163"
+msgid "Stream to receive"
+msgstr ""
+
+msgctxt "#32164"
+msgid "First receiver channel"
+msgstr ""
+
+msgctxt "#32165"
+msgid "%s goes to %s, channels %d to %d."
+msgstr ""
+
+msgctxt "#32166"
+msgid "The Dante device did not take it:"
+msgstr ""
+
+msgctxt "#32167"
+msgid "Subscribe to a stream"
+msgstr ""
+
+msgctxt "#32168"
+msgid "Turn AES67 mode on"
+msgstr ""
+
+msgctxt "#32169"
+msgid "Turn AES67 mode off"
+msgstr ""
+
+msgctxt "#32170"
+msgid "Done. Reboot the Dante device for the change to take effect."
+msgstr ""
