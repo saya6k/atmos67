@@ -58,6 +58,12 @@ class SyncTest(unittest.TestCase):
         # Sender 71.3 ms, decoder allowance 40 ms, receiver 5 ms, trim -6.3 ms.
         self.assertEqual(common.av_offset(71.3, 5.0, -6.3), -0.11)
 
+    def test_reads_the_status_answer(self):
+        status = common.answer_json('ok {"grandmaster": "00-11", "streams": [], "playing": true}')
+        self.assertTrue(status["playing"])
+        with self.assertRaises(ValueError):
+            common.answer_json("error: unknown command")
+
     def test_reads_sender_answers(self):
         self.assertEqual(common.answer_value("ok 71.3"), 71.3)
         for answer in ["ok", "error: unknown command", ""]:

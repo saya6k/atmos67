@@ -73,6 +73,13 @@
             <close>true</close>
           </control>
         </setting>
+        <setting id="status" type="action" label="32036" help="32037">
+          <level>0</level>
+          <data>RunScript(special://home/addons/service.atmos67/status.py)</data>
+          <control type="button" format="action">
+            <close>true</close>
+          </control>
+        </setting>
       </group>
     </category>
     <category id="bass" label="32004">

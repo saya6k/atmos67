@@ -234,6 +234,18 @@ fn takes_volume_commands_on_its_socket() {
     assert!(replies.next().unwrap().unwrap().starts_with("error: "));
     // Without a correction, only the 50 ms playout buffer.
     assert_eq!(replies.next().unwrap().unwrap(), "ok 50.0");
+    // A second connection is served while the first stays open.
+    let second = UnixStream::connect(&socket).unwrap();
+    (&second).write_all(b"status\n").unwrap();
+    let mut answer = String::new();
+    BufReader::new(&second).read_line(&mut answer).unwrap();
+    drop(replies);
+    let status: serde_json::Value = serde_json::from_str(answer.strip_prefix("ok ").expect(&answer)).unwrap();
+    assert_eq!(status["grandmaster"], GMID);
+    assert_eq!(status["streams"][1]["channels"].as_array().unwrap().len(), 4);
+    assert_eq!(status["streams"][0]["address"], "239.69.67.221");
+    assert_eq!(status["volume_db"], -12.0412);
+    assert_eq!(status["playing"], false);
 
     let input = input();
     let received = receive(ports, child, &[8, 4], &input);

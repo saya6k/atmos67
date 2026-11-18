@@ -46,6 +46,14 @@ def answer_value(answer):
     return float(value)
 
 
+def answer_json(answer):
+    """The JSON of a sender answer `ok {...}`."""
+    status, _, value = answer.partition(" ")
+    if status != "ok" or not value:
+        raise ValueError(answer)
+    return json.loads(value)
+
+
 def av_offset(sender_ms, receiver_ms, trim_ms):
     """Kodi's audio offset in seconds for audio that arrives this late.
 

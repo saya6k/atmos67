@@ -27,7 +27,9 @@
 //! the program, and `ok <sample>` answers once the last of them has left,
 //! with the PTP time (in samples) the first one was sent at.
 //!
-//! `channels` answers `ok <count>` of the channels sent, and `latency`
+//! `status` answers `ok` and one line of JSON: the PTP grandmaster, the
+//! streams, whether the program is playing, send errors, the volume and the
+//! latency. `channels` answers `ok <count>` of the channels sent, and `latency`
 //! answers `ok <ms>`: how long the sender holds the program back,
 //! its playout buffer and the correction's block and filters together.
 
@@ -37,7 +39,7 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -92,6 +94,13 @@ struct Queue {
     packets: VecDeque<Vec<f32>>,
     /// stdin reached its end.
     closed: bool,
+}
+
+/// What `status` reports: fixed facts, and what the send loop updates.
+struct Status {
+    info: serde_json::Value,
+    playing: AtomicBool,
+    send_errors: AtomicU64,
 }
 
 /// A measurement signal waiting to be sent in place of the program.
@@ -155,14 +164,6 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
     let gain = Arc::new(AtomicU32::new(Volume { db: config.volume_db, muted: false }.gain().to_bits()));
     let measurement = Arc::new(Mutex::new(Measurement::default()));
     let latency_ms = config.buffer_ms as f64 + design.as_ref().map_or(0.0, |d| d.latency_ms);
-    if let Some(path) = &config.control {
-        let _ = std::fs::remove_file(path);
-        let listener = UnixListener::bind(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let gain = Arc::clone(&gain);
-        let measurement = Arc::clone(&measurement);
-        let volume = Volume { db: config.volume_db, muted: false };
-        thread::spawn(move || control(&listener, volume, &gain, &measurement, channels, latency_ms));
-    }
 
     // The address the route to the streams' destination sends from. Binding
     // to it also makes multicast leave through that interface.
@@ -176,6 +177,7 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
         ^ u64::from(std::process::id()) << 32;
 
     let mut streams = Vec::new();
+    let mut described = Vec::new();
     for (index, (name, address, map)) in plan(names, config.address, config.streams.as_deref())?.into_iter().enumerate() {
         if !address.is_multicast() {
             return Err(format!("{address} is not a multicast address").into());
@@ -184,6 +186,7 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
         socket.set_multicast_ttl_v4(TTL)?;
         let carried: Vec<&str> = map.iter().map(|&c| names.get(c).map_or("?", String::as_str)).collect();
         eprintln!("atmos67: sending {name} [{}] to {address}:{RTP_PORT} from {source}", carried.join(" "));
+        described.push(serde_json::json!({ "name": name, "address": address.to_string(), "channels": carried }));
         streams.push(Stream {
             socket,
             destination: SocketAddrV4::new(address, RTP_PORT),
@@ -192,6 +195,31 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
             sequence: 0,
             sdp: sdp(&name, session + index as u64, source, address, map.len(), config),
         });
+    }
+
+    let status = Arc::new(Status {
+        info: serde_json::json!({
+            "grandmaster": config.gmid,
+            "domain": config.domain,
+            "source": source.to_string(),
+            "outputs": names,
+            "streams": described,
+            "latency_ms": latency_ms,
+        }),
+        playing: AtomicBool::new(false),
+        send_errors: AtomicU64::new(0),
+    });
+    if let Some(path) = &config.control {
+        let _ = std::fs::remove_file(path);
+        let listener = UnixListener::bind(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let controls = Arc::new(Controls {
+            volume: Mutex::new(Volume { db: config.volume_db, muted: false }),
+            gain: Arc::clone(&gain),
+            measurement: Arc::clone(&measurement),
+            channels,
+            status: Arc::clone(&status),
+        });
+        thread::spawn(move || control(&listener, &controls));
     }
 
     let announcer = UdpSocket::bind((source, 0))?;
@@ -264,6 +292,7 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
             let finished = if last { measurement.done.take().zip(measurement.started.take()) } else { None };
             (packet, finished)
         };
+        status.playing.store(packet.is_some(), Ordering::Relaxed);
         let target = f32::from_bits(gain.load(Ordering::Relaxed));
         let samples = match (measured.as_deref(), packet.as_deref()) {
             (Some(measured), _) => measured,
@@ -290,6 +319,9 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
             );
             stream.sequence = stream.sequence.wrapping_add(1);
             let sent = stream.socket.send_to(&data, stream.destination);
+            if sent.is_err() {
+                status.send_errors.fetch_add(1, Ordering::Relaxed);
+            }
             if sent.is_err() != send_failed {
                 send_failed = sent.is_err();
                 match sent {
@@ -402,51 +434,74 @@ fn ramp(samples: &mut [f32], channels: usize, from: f32, to: f32) {
     }
 }
 
-/// Serves commands, one per line, answering each with `ok`, `ok <value>` or `error: …`.
-fn control(
-    listener: &UnixListener,
-    mut volume: Volume,
-    gain: &AtomicU32,
-    measurement: &Mutex<Measurement>,
+/// What the control socket's connections share.
+struct Controls {
+    volume: Mutex<Volume>,
+    gain: Arc<AtomicU32>,
+    measurement: Arc<Mutex<Measurement>>,
     channels: usize,
-    latency_ms: f64,
-) {
+    status: Arc<Status>,
+}
+
+/// Serves each connection on its own thread, so a long `play` or a client
+/// that keeps its connection open does not hold up the others.
+fn control(listener: &UnixListener, controls: &Arc<Controls>) {
     for connection in listener.incoming().flatten() {
-        let Ok(mut writer) = connection.try_clone() else { continue };
-        let mut reader = BufReader::new(connection);
-        let mut line = String::new();
-        loop {
-            line.clear();
-            if !matches!(reader.read_line(&mut line), Ok(1..)) {
-                break;
+        let controls = Arc::clone(controls);
+        thread::spawn(move || serve(connection, &controls));
+    }
+}
+
+/// Answers commands, one per line, with `ok`, `ok <value>` or `error: …`.
+fn serve(connection: std::os::unix::net::UnixStream, controls: &Controls) {
+    let Ok(mut writer) = connection.try_clone() else { return };
+    let mut reader = BufReader::new(connection);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        if !matches!(reader.read_line(&mut line), Ok(1..)) {
+            return;
+        }
+        let line = line.trim_end();
+        let status = &controls.status;
+        let set_volume = |change: &dyn Fn(&mut Volume)| {
+            let mut volume = controls.volume.lock().expect("no panic holds the volume");
+            change(&mut volume);
+            controls.gain.store(volume.gain().to_bits(), Ordering::Relaxed);
+        };
+        let reply = match line.split_whitespace().collect::<Vec<_>>()[..] {
+            ["play", count, frames] => play(&mut reader, count, frames, controls.channels, &controls.measurement),
+            ["latency"] => Ok(format!("{:.1}", status.info["latency_ms"].as_f64().unwrap_or_default())),
+            ["status"] => {
+                let volume = *controls.volume.lock().expect("no panic holds the volume");
+                let mut report = status.info.clone();
+                report["playing"] = status.playing.load(Ordering::Relaxed).into();
+                report["send_errors"] = status.send_errors.load(Ordering::Relaxed).into();
+                report["volume_db"] = volume.db.into();
+                report["muted"] = volume.muted.into();
+                Ok(report.to_string())
             }
-            let line = line.trim_end();
-            let reply = match line.split_whitespace().collect::<Vec<_>>()[..] {
-                ["play", count, frames] => play(&mut reader, count, frames, channels, measurement),
-                ["latency"] => Ok(format!("{latency_ms:.1}")),
-                ["channels"] => Ok(channels.to_string()),
-                ["volume", db] => match db.parse::<f64>() {
-                    Ok(db) if db.is_finite() => {
-                        volume.db = db;
-                        Ok(String::new())
-                    }
-                    _ => Err(format!("bad volume {db}")),
-                },
-                ["mute", state @ ("0" | "1")] => {
-                    volume.muted = state == "1";
+            ["channels"] => Ok(controls.channels.to_string()),
+            ["volume", db] => match db.parse::<f64>() {
+                Ok(db) if db.is_finite() => {
+                    set_volume(&|v| v.db = db);
                     Ok(String::new())
                 }
-                _ => Err(format!("unknown command {line:?}")),
-            };
-            gain.store(volume.gain().to_bits(), Ordering::Relaxed);
-            let reply = match reply {
-                Ok(value) if value.is_empty() => "ok\n".to_string(),
-                Ok(value) => format!("ok {value}\n"),
-                Err(e) => format!("error: {e}\n"),
-            };
-            if writer.write_all(reply.as_bytes()).is_err() {
-                break;
+                _ => Err(format!("bad volume {db}")),
+            },
+            ["mute", state @ ("0" | "1")] => {
+                set_volume(&|v| v.muted = state == "1");
+                Ok(String::new())
             }
+            _ => Err(format!("unknown command {line:?}")),
+        };
+        let reply = match reply {
+            Ok(value) if value.is_empty() => "ok\n".to_string(),
+            Ok(value) => format!("ok {value}\n"),
+            Err(e) => format!("error: {e}\n"),
+        };
+        if writer.write_all(reply.as_bytes()).is_err() {
+            return;
         }
     }
 }

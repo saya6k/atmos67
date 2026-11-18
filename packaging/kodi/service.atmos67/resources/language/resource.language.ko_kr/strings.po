@@ -355,3 +355,59 @@ msgstr "이 스트림을 삭제할까요?"
 msgctxt "#32133"
 msgid "not sent: %s"
 msgstr "보내지 않는 채널: %s"
+
+msgctxt "#32036"
+msgid "Status"
+msgstr "상태 보기"
+
+msgctxt "#32037"
+msgid "What the service is doing: PTP clock, streams, playback, volume and latency."
+msgstr "서비스 상태를 봅니다: PTP 클록, 스트림, 재생, 볼륨, 지연."
+
+msgctxt "#32140"
+msgid "atmos67 status"
+msgstr "atmos67 상태"
+
+msgctxt "#32141"
+msgid "Service: %s"
+msgstr "서비스: %s"
+
+msgctxt "#32142"
+msgid "Correction: %s"
+msgstr "보정: %s"
+
+msgctxt "#32143"
+msgid "The sender does not answer. It waits for the PTP clock before it starts; see the service log."
+msgstr "송출기가 응답하지 않습니다. PTP 클록을 찾을 때까지 시작하지 않으니 서비스 로그를 확인해 주세요."
+
+msgctxt "#32144"
+msgid "PTP grandmaster: %s (domain %s)"
+msgstr "PTP 그랜드마스터: %s (도메인 %s)"
+
+msgctxt "#32145"
+msgid "Playing"
+msgstr "재생 중"
+
+msgctxt "#32146"
+msgid "Silent (nothing playing)"
+msgstr "무음 (재생 없음)"
+
+msgctxt "#32147"
+msgid "Volume: muted"
+msgstr "볼륨: 음소거"
+
+msgctxt "#32148"
+msgid "Volume: %s dB"
+msgstr "볼륨: %s dB"
+
+msgctxt "#32149"
+msgid "Sound held back by the sender: %s ms"
+msgstr "송출기가 늦추는 시간: %s ms"
+
+msgctxt "#32150"
+msgid "Send errors: %s"
+msgstr "송출 오류: %s"
+
+msgctxt "#32151"
+msgid "Streams from %s:"
+msgstr "%s에서 보내는 스트림:"

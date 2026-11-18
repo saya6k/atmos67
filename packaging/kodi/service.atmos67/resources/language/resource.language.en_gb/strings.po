@@ -355,3 +355,59 @@ msgstr ""
 msgctxt "#32133"
 msgid "not sent: %s"
 msgstr ""
+
+msgctxt "#32036"
+msgid "Status"
+msgstr ""
+
+msgctxt "#32037"
+msgid "What the service is doing: PTP clock, streams, playback, volume and latency."
+msgstr ""
+
+msgctxt "#32140"
+msgid "atmos67 status"
+msgstr ""
+
+msgctxt "#32141"
+msgid "Service: %s"
+msgstr ""
+
+msgctxt "#32142"
+msgid "Correction: %s"
+msgstr ""
+
+msgctxt "#32143"
+msgid "The sender does not answer. It waits for the PTP clock before it starts; see the service log."
+msgstr ""
+
+msgctxt "#32144"
+msgid "PTP grandmaster: %s (domain %s)"
+msgstr ""
+
+msgctxt "#32145"
+msgid "Playing"
+msgstr ""
+
+msgctxt "#32146"
+msgid "Silent (nothing playing)"
+msgstr ""
+
+msgctxt "#32147"
+msgid "Volume: muted"
+msgstr ""
+
+msgctxt "#32148"
+msgid "Volume: %s dB"
+msgstr ""
+
+msgctxt "#32149"
+msgid "Sound held back by the sender: %s ms"
+msgstr ""
+
+msgctxt "#32150"
+msgid "Send errors: %s"
+msgstr ""
+
+msgctxt "#32151"
+msgid "Streams from %s:"
+msgstr ""
