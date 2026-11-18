@@ -33,7 +33,7 @@ use openjoc_scene::SpeakerLayout;
 const USAGE: &str = "usage: atmos67 (--layout PRESET | --layout-file LAYOUT.json) [--input-channels 2|8] [--input-rate HZ] < capture.s16le > speakers.f32le
        atmos67 (--layout PRESET | --layout-file LAYOUT.json) --aes67-sources > status.json
        atmos67 (--layout PRESET | --layout-file LAYOUT.json) --aes67-send --ptp-gmid ID [--ptp-domain N] [--aes67-address A.B.C.D] [--aes67-buffer-ms MS]
-           [--dsp SECS_EXPORT_DIR] [--volume DB] [--control SOCKET] < speakers.f32le
+           [--dsp SECS_EXPORT_DIR] [--volume DB] [--control SOCKET] [--streams STREAMS.json] < speakers.f32le
        atmos67 (--layout PRESET | --layout-file LAYOUT.json) --write-design DIR [--base SECS_EXPORT_DIR]
            [--subs N] [--crossover front|center|surround|back|top=HZ]... [--slope 12|24]
            [--trim ROLE=DB]... [--delay ROLE=MS]...
@@ -71,6 +71,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         buffer_ms: 100,
         volume_db: 0.0,
         control: None,
+        streams: None,
     };
     let mut dsp = None;
     let mut write_design = None;
@@ -99,6 +100,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             "--dsp" => dsp = Some(std::path::PathBuf::from(value()?)),
             "--volume" => send_config.volume_db = value()?.parse()?,
             "--control" => send_config.control = Some(value()?.into()),
+            "--streams" => send_config.streams = Some(value()?.into()),
             "--dsp-only" => dsp_only = true,
             "--write-design" => write_design = Some(std::path::PathBuf::from(value()?)),
             "--base" => base = Some(std::path::PathBuf::from(value()?)),
@@ -178,7 +180,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         if let Some(design) = &design {
             eprintln!("atmos67: correcting with {} channels out [{}]", design.outputs.len(), design.outputs.join(" "));
         }
-        return send::run(info.channel_count, &send_config, design);
+        let names = design.as_ref().map_or_else(|| info.channel_labels.clone(), |d| d.outputs.clone());
+        return send::run(info.channel_count, &names, &send_config, design);
     }
     eprintln!(
         "atmos67: output {} channels [{}], FLOAT32LE",

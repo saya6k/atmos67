@@ -91,6 +91,33 @@ class SocketTest(unittest.TestCase):
         self.assertIsNone(common.progress("atmos67: something on stderr"))
 
 
+class StreamsTest(unittest.TestCase):
+    OUTPUTS = ["L", "R", "C", "Ls", "Rs", "Lb", "Rb", "Tfl", "Tfr", "Tbl", "Tbr", "SW1"]
+
+    def test_defaults_to_8_channels_a_stream(self):
+        streams = common.default_streams(self.OUTPUTS, "239.69.67.255")
+        self.assertEqual([s["name"] for s in streams], ["atmos67 ch 1-8", "atmos67 ch 9-12"])
+        self.assertEqual(streams[1]["address"], "239.69.68.0")
+        self.assertEqual(streams[1]["channels"], ["Tfr", "Tbl", "Tbr", "SW1"])
+
+    def test_finds_what_the_sender_would_refuse(self):
+        self.assertIsNone(common.stream_problem({"address": "239.1.2.3", "channels": ["L"] * 8}))
+        self.assertEqual(common.stream_problem({"address": "239.1.2.3", "channels": ["L"] * 9}), "channels")
+        self.assertEqual(common.stream_problem({"address": "10.0.0.1", "channels": []}), "address")
+        self.assertEqual(common.stream_problem({"address": "239.1.x.3", "channels": []}), "address")
+
+    def test_plan_reaches_the_service_only_when_there_is_one(self):
+        profile = tempfile.mkdtemp()
+        self.assertEqual(common.values(SETTINGS, {}, profile, 0)["STREAMS"], "")
+        plan = [{"name": "front", "address": "239.1.1.1", "channels": ["L", "R", "C", "SW1"]}]
+        common.write_streams(profile, plan)
+        self.assertEqual(common.read_streams(profile), plan)
+        self.assertEqual(common.values(SETTINGS, {}, profile, 0)["STREAMS"], common.streams_path(profile))
+        self.assertEqual(common.unassigned(self.OUTPUTS, plan)[:2], ["Ls", "Rs"])
+        common.write_streams(profile, [])
+        self.assertEqual(common.read_streams(profile), [])
+
+
 class LevelsTest(unittest.TestCase):
     def test_round_trips(self):
         profile = tempfile.mkdtemp()

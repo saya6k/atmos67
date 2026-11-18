@@ -289,3 +289,32 @@ fn plays_measurement_frames_from_its_socket_in_place_of_the_program() {
     assert_eq!(first_stream, want);
     assert_eq!(first_timestamp, Some(started as u32));
 }
+
+#[test]
+fn sends_the_streams_a_plan_names() {
+    let _ports = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let plan = std::env::temp_dir().join(format!("atmos67-streams-{}.json", std::process::id()));
+    // SW1 is not an output without a correction: reported and left out.
+    std::fs::write(
+        &plan,
+        r#"[{"name": "front", "address": "239.69.67.251", "channels": ["L", "FR", "C", "LFE", "SW1"]},
+            {"name": "tops", "address": "239.69.67.252", "channels": ["TFL", "TFR", "TBL", "TBR", "Rs"]}]"#,
+    )
+    .unwrap();
+    let first = Ipv4Addr::new(239, 69, 67, 251);
+    let input = input();
+    let ports = listen(first, 2);
+    let child = spawn(first, &["--streams", plan.to_str().unwrap()]);
+    let received = receive(ports, child, &[4, 5], &input);
+    // Rendered FL FR FC LFE Lb Rb Ls Rs TFL TFR TBL TBR.
+    let expected: Vec<f32> = input
+        .as_chunks::<CHANNELS>()
+        .0
+        .iter()
+        .flat_map(|f| [f[0], f[1], f[2], f[3], f[8], f[9], f[10], f[11], f[7]])
+        .collect();
+    check(&received, &[4, 5], &expected, 0);
+    assert!(received.sdps.iter().any(|sdp| sdp.contains("\r\ns=front\r\n") && sdp.contains("L24/48000/4")));
+    assert!(received.sdps.iter().any(|sdp| sdp.contains("\r\ns=tops\r\n") && sdp.contains("c=IN IP4 239.69.67.252/15")));
+    std::fs::remove_file(plan).unwrap();
+}

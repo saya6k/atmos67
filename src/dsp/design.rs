@@ -47,7 +47,7 @@ pub fn config_path(folder: &Path, manifest: &serde_json::Value) -> Result<PathBu
 }
 
 /// The rendered speaker name of a SECS 2R input role.
-fn speaker(role: &str) -> &str {
+pub fn speaker(role: &str) -> &str {
     match role {
         "L" => "FL",
         "R" => "FR",

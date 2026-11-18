@@ -15,6 +15,12 @@
 //! leaves, ramped across the packet, so a change is heard at once without a
 //! click; a Unix socket takes `volume <dB>` and `mute 0|1` lines.
 //!
+//! Without a stream plan the channels go out in order, 8 to a stream, on
+//! consecutive addresses. A plan (`--streams`, JSON) names each stream, its
+//! address and the output channels it carries, by speaker name in either
+//! spelling (`L` or `FL`); a name the outputs lack is reported and left out,
+//! since the outputs change with the correction mode.
+//!
 //! For measurement the socket also takes `play <channels> <frames>` followed
 //! by that many interleaved FLOAT32LE frames of the output channels. They are
 //! sent from the next packet on, contiguously and as they are, in place of
@@ -29,16 +35,16 @@ use std::collections::VecDeque;
 use std::error::Error;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
-use std::ops::Range;
 use std::os::unix::net::UnixListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::aes67::CHANNELS_PER_STREAM;
-use crate::dsp::design::Design;
+use crate::dsp::design::{Design, speaker};
+use crate::layout::canonical;
 
 const RATE: u64 = 48_000;
 /// 1 ms, the packet time every AES67 receiver has to accept.
@@ -68,12 +74,14 @@ pub struct Config {
     pub volume_db: f64,
     /// Where to listen for volume commands.
     pub control: Option<PathBuf>,
+    /// Which channels go in which stream; 8 at a time in order without one.
+    pub streams: Option<PathBuf>,
 }
 
 struct Stream {
     socket: UdpSocket,
     destination: SocketAddrV4,
-    channels: Range<usize>,
+    channels: Vec<usize>,
     ssrc: u32,
     sequence: u16,
     sdp: String,
@@ -96,8 +104,53 @@ struct Measurement {
     done: Option<mpsc::Sender<u64>>,
 }
 
+/// A stream to send: its name, multicast address and output channels.
+type Planned = (String, Ipv4Addr, Vec<usize>);
+
+/// The streams for outputs called `names`: from the plan in `file`, or 8
+/// channels at a time on addresses counting up from `first`.
+fn plan(names: &[String], first: Ipv4Addr, file: Option<&Path>) -> Result<Vec<Planned>, Box<dyn Error>> {
+    let Some(file) = file else {
+        let all: Vec<usize> = (0..names.len()).collect();
+        return Ok(all
+            .chunks(CHANNELS_PER_STREAM)
+            .enumerate()
+            .map(|(i, map)| {
+                let name = format!("atmos67 ch {}-{}", map[0] + 1, map[map.len() - 1] + 1);
+                (name, Ipv4Addr::from(u32::from(first) + i as u32), map.to_vec())
+            })
+            .collect());
+    };
+    let same = |a: &str, b: &str| canonical(speaker(a)) == canonical(speaker(b));
+    let entries: Vec<serde_json::Value> = serde_json::from_slice(&std::fs::read(file)?)?;
+    let mut planned = Vec::new();
+    for entry in &entries {
+        let name = entry["name"].as_str().ok_or("a stream without a name")?.to_string();
+        let address: Ipv4Addr = entry["address"].as_str().ok_or_else(|| format!("{name}: no address"))?.parse()?;
+        let wanted = entry["channels"].as_array().ok_or_else(|| format!("{name}: no channels"))?;
+        if wanted.len() > CHANNELS_PER_STREAM {
+            return Err(format!("{name}: {} channels; a stream carries at most {CHANNELS_PER_STREAM}", wanted.len()).into());
+        }
+        let mut channels = Vec::new();
+        for channel in wanted {
+            let channel = channel.as_str().ok_or_else(|| format!("{name}: a channel is not a name"))?;
+            match names.iter().position(|n| same(n, channel)) {
+                Some(index) => channels.push(index),
+                None => eprintln!("atmos67: stream {name}: no output {channel} (outputs: {}); left out", names.join(" ")),
+            }
+        }
+        if channels.is_empty() {
+            eprintln!("atmos67: stream {name} has no channel to send; not sent");
+        } else {
+            planned.push((name, address, channels));
+        }
+    }
+    Ok(planned)
+}
+
 /// Sends `channels_in` rendered channels, through `design` when there is one.
-pub fn run(channels_in: usize, config: &Config, design: Option<Design>) -> Result<(), Box<dyn Error>> {
+/// `names` names the channels sent: the design's outputs, or the rendered ones.
+pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option<Design>) -> Result<(), Box<dyn Error>> {
     let channels = design.as_ref().map_or(channels_in, |d| d.outputs.len());
     let gain = Arc::new(AtomicU32::new(Volume { db: config.volume_db, muted: false }.gain().to_bits()));
     let measurement = Arc::new(Mutex::new(Measurement::default()));
@@ -122,21 +175,19 @@ pub fn run(channels_in: usize, config: &Config, design: Option<Design>) -> Resul
     let session = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos() as u64
         ^ u64::from(std::process::id()) << 32;
 
-    let all: Vec<usize> = (0..channels).collect();
     let mut streams = Vec::new();
-    for (index, map) in all.chunks(CHANNELS_PER_STREAM).enumerate() {
-        let address = Ipv4Addr::from(u32::from(config.address) + index as u32);
+    for (index, (name, address, map)) in plan(names, config.address, config.streams.as_deref())?.into_iter().enumerate() {
         if !address.is_multicast() {
             return Err(format!("{address} is not a multicast address").into());
         }
         let socket = UdpSocket::bind((source, 0))?;
         socket.set_multicast_ttl_v4(TTL)?;
-        let name = format!("atmos67 ch {}-{}", map[0] + 1, map[map.len() - 1] + 1);
-        eprintln!("atmos67: sending {name} to {address}:{RTP_PORT} from {source}");
+        let carried: Vec<&str> = map.iter().map(|&c| names.get(c).map_or("?", String::as_str)).collect();
+        eprintln!("atmos67: sending {name} [{}] to {address}:{RTP_PORT} from {source}", carried.join(" "));
         streams.push(Stream {
             socket,
             destination: SocketAddrV4::new(address, RTP_PORT),
-            channels: map[0]..map[map.len() - 1] + 1,
+            channels: map.clone(),
             ssrc: (session >> 16) as u32 ^ index as u32,
             sequence: 0,
             sdp: sdp(&name, session + index as u64, source, address, map.len(), config),
@@ -235,7 +286,7 @@ pub fn run(channels_in: usize, config: &Config, design: Option<Design>) -> Resul
                 stream.ssrc,
                 samples,
                 channels,
-                stream.channels.clone(),
+                &stream.channels,
             );
             stream.sequence = stream.sequence.wrapping_add(1);
             let sent = stream.socket.send_to(&data, stream.destination);
@@ -413,7 +464,7 @@ fn rtp_packet(
     ssrc: u32,
     samples: &[f32],
     channels: usize,
-    stream: Range<usize>,
+    stream: &[usize],
 ) -> Vec<u8> {
     let mut packet = Vec::with_capacity(12 + PACKET_FRAMES * stream.len() * 3);
     packet.extend([0x80, PAYLOAD_TYPE]);
@@ -421,7 +472,7 @@ fn rtp_packet(
     packet.extend(timestamp.to_be_bytes());
     packet.extend(ssrc.to_be_bytes());
     for frame in samples.chunks_exact(channels) {
-        for sample in &frame[stream.clone()] {
+        for sample in stream.iter().map(|&c| frame[c]) {
             let value = (sample.clamp(-1.0, 1.0) * 8_388_607.0).round() as i32;
             packet.extend(&value.to_be_bytes()[1..]);
         }
@@ -478,7 +529,7 @@ mod tests {
     fn rtp_packet_carries_one_streams_channels_as_l24() {
         // Two frames of three channels; the stream is channels 1 and 2.
         let samples = [0.0, 1.0, -1.0, 0.0, 0.5, 2.0];
-        let packet = rtp_packet(0x0102, 0x0304_0506, 0x0708_090A, &samples, 3, 1..3);
+        let packet = rtp_packet(0x0102, 0x0304_0506, 0x0708_090A, &samples, 3, &[1, 2]);
         assert_eq!(packet[..12], [0x80, 98, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
         assert_eq!(
             packet[12..],
@@ -492,6 +543,33 @@ mod tests {
         ramp(&mut samples, 2, 1.0, 0.5);
         assert!((samples[0] - (1.0 - 0.5 / 48.0)).abs() < 1e-6);
         assert_eq!(samples[PACKET_FRAMES * 2 - 2..], [0.5, 0.5]);
+    }
+
+    #[test]
+    fn plans_streams_by_speaker_name_in_either_spelling() {
+        let names: Vec<String> = ["L", "R", "C", "Ls", "Rs", "SW1"].iter().map(|s| s.to_string()).collect();
+        let file = std::env::temp_dir().join(format!("atmos67-plan-{}", std::process::id()));
+        std::fs::write(
+            &file,
+            r#"[{"name": "front", "address": "239.1.1.1", "channels": ["FL", "FR", "FC", "SW1"]},
+                {"name": "rear", "address": "239.1.1.2", "channels": ["Rs", "Ls", "TFL"]},
+                {"name": "empty", "address": "239.1.1.3", "channels": ["LFE"]}]"#,
+        )
+        .unwrap();
+        let planned = plan(&names, Ipv4Addr::new(239, 0, 0, 1), Some(&file)).unwrap();
+        assert_eq!(
+            planned,
+            vec![
+                ("front".to_string(), Ipv4Addr::new(239, 1, 1, 1), vec![0, 1, 2, 5]),
+                ("rear".to_string(), Ipv4Addr::new(239, 1, 1, 2), vec![4, 3]),
+            ]
+        );
+        std::fs::write(&file, r#"[{"name": "big", "address": "239.1.1.1", "channels": ["L","L","L","L","L","L","L","L","L"]}]"#).unwrap();
+        assert!(plan(&names, Ipv4Addr::new(239, 0, 0, 1), Some(&file)).is_err());
+        std::fs::remove_file(file).unwrap();
+
+        let default = plan(&names, Ipv4Addr::new(239, 0, 0, 1), None).unwrap();
+        assert_eq!(default, vec![("atmos67 ch 1-6".to_string(), Ipv4Addr::new(239, 0, 0, 1), (0..6).collect())]);
     }
 
     #[test]
@@ -509,6 +587,7 @@ mod tests {
             buffer_ms: 100,
             volume_db: 0.0,
             control: None,
+            streams: None,
         };
         let sdp = sdp(
             "atmos67 ch 9-12",

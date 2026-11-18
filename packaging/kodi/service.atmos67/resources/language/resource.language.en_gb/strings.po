@@ -291,3 +291,67 @@ msgstr ""
 msgctxt "#32109"
 msgid "Put the microphone back at the main seat to measure how late the sound arrives, for the picture sync."
 msgstr ""
+
+msgctxt "#32034"
+msgid "Streams"
+msgstr ""
+
+msgctxt "#32035"
+msgid "Which speakers go in which stream, for receivers that take only some of them. Without changes, 8 channels a stream in order."
+msgstr ""
+
+msgctxt "#32120"
+msgid "AES67 streams"
+msgstr ""
+
+msgctxt "#32121"
+msgid "Add a stream"
+msgstr ""
+
+msgctxt "#32122"
+msgid "Back to 8 channels a stream"
+msgstr ""
+
+msgctxt "#32123"
+msgid "Name: %s"
+msgstr ""
+
+msgctxt "#32124"
+msgid "Multicast address: %s"
+msgstr ""
+
+msgctxt "#32125"
+msgid "Channels: %s"
+msgstr ""
+
+msgctxt "#32126"
+msgid "Delete this stream"
+msgstr ""
+
+msgctxt "#32127"
+msgid "Stream name (shown by the receivers)"
+msgstr ""
+
+msgctxt "#32128"
+msgid "Multicast address (239.x.x.x)"
+msgstr ""
+
+msgctxt "#32129"
+msgid "Not a multicast address (224.0.0.0 to 239.255.255.255)."
+msgstr ""
+
+msgctxt "#32130"
+msgid "Channels of this stream (up to 8)"
+msgstr ""
+
+msgctxt "#32131"
+msgid "A stream carries at most %d channels."
+msgstr ""
+
+msgctxt "#32132"
+msgid "Delete this stream?"
+msgstr ""
+
+msgctxt "#32133"
+msgid "not sent: %s"
+msgstr ""

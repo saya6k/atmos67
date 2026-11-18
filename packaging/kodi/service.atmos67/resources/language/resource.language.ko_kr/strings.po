@@ -291,3 +291,67 @@ msgstr "계산한 지연에 더합니다. 소리가 아직 늦으면 올립니�
 msgctxt "#32109"
 msgid "Put the microphone back at the main seat to measure how late the sound arrives, for the picture sync."
 msgstr "영상 동기를 위해 소리가 늦는 정도를 잽니다. 마이크를 주 청취 위치로 다시 옮겨 주세요."
+
+msgctxt "#32034"
+msgid "Streams"
+msgstr "스트림 구성"
+
+msgctxt "#32035"
+msgid "Which speakers go in which stream, for receivers that take only some of them. Without changes, 8 channels a stream in order."
+msgstr "어느 스피커를 어느 스트림에 넣을지 정합니다. 수신기마다 필요한 채널만 받게 할 수 있습니다. 바꾸지 않으면 순서대로 8채널씩 보냅니다."
+
+msgctxt "#32120"
+msgid "AES67 streams"
+msgstr "AES67 스트림"
+
+msgctxt "#32121"
+msgid "Add a stream"
+msgstr "스트림 추가"
+
+msgctxt "#32122"
+msgid "Back to 8 channels a stream"
+msgstr "8채널씩 기본값으로"
+
+msgctxt "#32123"
+msgid "Name: %s"
+msgstr "이름: %s"
+
+msgctxt "#32124"
+msgid "Multicast address: %s"
+msgstr "멀티캐스트 주소: %s"
+
+msgctxt "#32125"
+msgid "Channels: %s"
+msgstr "채널: %s"
+
+msgctxt "#32126"
+msgid "Delete this stream"
+msgstr "이 스트림 삭제"
+
+msgctxt "#32127"
+msgid "Stream name (shown by the receivers)"
+msgstr "스트림 이름 (수신기에 보이는 이름)"
+
+msgctxt "#32128"
+msgid "Multicast address (239.x.x.x)"
+msgstr "멀티캐스트 주소 (239.x.x.x)"
+
+msgctxt "#32129"
+msgid "Not a multicast address (224.0.0.0 to 239.255.255.255)."
+msgstr "멀티캐스트 주소가 아닙니다(224.0.0.0~239.255.255.255)."
+
+msgctxt "#32130"
+msgid "Channels of this stream (up to 8)"
+msgstr "이 스트림의 채널 (최대 8개)"
+
+msgctxt "#32131"
+msgid "A stream carries at most %d channels."
+msgstr "한 스트림에는 채널을 %d개까지 넣을 수 있습니다."
+
+msgctxt "#32132"
+msgid "Delete this stream?"
+msgstr "이 스트림을 삭제할까요?"
+
+msgctxt "#32133"
+msgid "not sent: %s"
+msgstr "보내지 않는 채널: %s"

@@ -53,6 +53,12 @@ if [ "$mode" != off ]; then
     fi
 fi
 
+# Which channels go in which stream; 8 a stream in order without a plan.
+streams=""
+if [ -s "${STREAMS:-}" ]; then
+    streams="--streams $STREAMS"
+fi
+
 # The Kodi add-on, running as osmc, sets the volume and calibrates through
 # the sender's socket.
 (
@@ -105,4 +111,4 @@ while :; do
 # shellcheck disable=SC2086
 done | atmos67 "$@" --aes67-send --aes67-address "$ADDRESS" --aes67-buffer-ms "$BUFFER_MS" \
     --ptp-gmid "$gmid" --ptp-domain "$PTP_DOMAIN" \
-    --control "$run/control" --volume "${VOLUME_DB:-0}" $dsp
+    --control "$run/control" --volume "${VOLUME_DB:-0}" $dsp $streams

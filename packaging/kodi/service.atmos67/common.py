@@ -72,6 +72,65 @@ def write_levels(profile, levels):
         json.dump(levels, file, indent=1, sort_keys=True)
 
 
+CHANNELS_PER_STREAM = 8
+
+
+def streams_path(profile):
+    return os.path.join(profile, "streams.json")
+
+
+def read_streams(profile):
+    """The stream plan: [{"name", "address", "channels": [speaker names]}], or [] for 8 channels a stream."""
+    try:
+        with open(streams_path(profile), encoding="utf-8") as file:
+            return json.load(file)
+    except (FileNotFoundError, ValueError):
+        return []
+
+
+def write_streams(profile, streams):
+    os.makedirs(profile, exist_ok=True)
+    if streams:
+        with open(streams_path(profile), "w", encoding="utf-8") as file:
+            json.dump(streams, file, indent=1)
+    elif os.path.exists(streams_path(profile)):
+        os.remove(streams_path(profile))
+
+
+def address_after(address, steps):
+    parts = [int(p) for p in address.split(".")]
+    value = sum(p << (8 * (3 - i)) for i, p in enumerate(parts)) + steps
+    return ".".join(str((value >> (8 * (3 - i))) & 255) for i in range(4))
+
+
+def default_streams(outputs, first):
+    """What the sender does without a plan: 8 channels a stream, addresses counting up."""
+    streams = []
+    for index in range(0, len(outputs), CHANNELS_PER_STREAM):
+        channels = outputs[index:index + CHANNELS_PER_STREAM]
+        streams.append({"name": f"atmos67 ch {index + 1}-{index + len(channels)}",
+                        "address": address_after(first, index // CHANNELS_PER_STREAM), "channels": channels})
+    return streams
+
+
+def stream_problem(stream):
+    """Why the sender would refuse `stream`, or None."""
+    if len(stream["channels"]) > CHANNELS_PER_STREAM:
+        return "channels"
+    try:
+        parts = [int(p) for p in stream["address"].split(".")]
+    except ValueError:
+        return "address"
+    if len(parts) != 4 or not 224 <= parts[0] <= 239 or any(not 0 <= p <= 255 for p in parts):
+        return "address"
+    return None
+
+
+def unassigned(outputs, streams):
+    used = {channel for stream in streams for channel in stream["channels"]}
+    return [output for output in outputs if output not in used]
+
+
 def auto_design(profile):
     return os.path.join(profile, "designs", "current")
 
@@ -100,6 +159,7 @@ def values(settings, levels, profile, volume, mode=None):
         "TRIMS": "" if mode == "measure" else pairs(trims),
         "DELAYS": "" if mode == "measure" else pairs(delays),
         "AUTO_DESIGN": auto_design(profile),
+        "STREAMS": streams_path(profile) if read_streams(profile) else "",
         "VOLUME_DB": volume,
     }
 

@@ -66,6 +66,13 @@
             <heading>32026</heading>
           </control>
         </setting>
+        <setting id="streams" type="action" label="32034" help="32035">
+          <level>0</level>
+          <data>RunScript(special://home/addons/service.atmos67/streams.py)</data>
+          <control type="button" format="action">
+            <close>true</close>
+          </control>
+        </setting>
       </group>
     </category>
     <category id="bass" label="32004">
