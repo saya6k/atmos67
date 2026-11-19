@@ -71,7 +71,7 @@ container machine run --root -n linux-test -- sh /Users/saya6k/Projects/aes67/ta
 
 - 단위 71, `tests/e2e.rs` 12, `tests/send.rs` 5, `tests/samples.rs` 12(`--ignored`), 애드온 파이썬 15개 통과. clippy 경고 없음.
 - `tests/calibrate.rs`는 멀티캐스트를 루프백에 둔 컨테이너에서 통과했다(README "시험"). 컨테이너 네트워크로 내보내면 VM 쪽에서 송출이 멈춰 측정이 거부된다.
-- armv7로는 이 수정 뒤에 돌리지 않았다. 패키지를 만들기 전에 `target/pkg.sh`로 다시 확인한다.
+- armv7(패키지 대상)로도 확인했다(2026-11-19, 스테레오 PCM 지원까지 넣은 `ad0dc9a`): libswresample을 넣어 이미지를 다시 빌드했고, armhf 바이너리로 단위 78, `tests/e2e.rs` 15, `tests/send.rs` 5 통과. `.deb`(6.7 MB) 설치, 공유 라이브러리는 libc 계열뿐(GLIBC 2.30 이하), 서비스 스크립트가 FIFO로 송출기를 띄워 3초에 RTP 3001패킷과 SDP를 내고, 수동 보정 13채널과 osmc 그룹 제어 소켓이 동작했다. `tests/samples.rs`와 캘리브레이션 E2E는 armhf로 돌리지 않았다.
 
 ## 남은 일
 
