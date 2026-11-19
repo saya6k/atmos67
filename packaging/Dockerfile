@@ -15,8 +15,9 @@ RUN sed -i '/security/d' /etc/apt/sources.list \
 ARG RUST_TOOLCHAIN=1.100.0
 RUN rustup toolchain install ${RUST_TOOLCHAIN} --profile minimal -c clippy -t armv7-unknown-linux-gnueabihf
 
-# A static libavcodec with only the decoders atmos67 uses, so the package
-# does not depend on the FFmpeg version of the installed system.
+# A static libavcodec with only the decoders atmos67 uses, and libswresample
+# for PCM that is not at 48 kHz, so the package does not depend on the
+# FFmpeg version of the installed system.
 ARG FFMPEG_VERSION=8.0
 RUN curl -fsSL https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz | tar xJ -C /tmp \
     && cd /tmp/ffmpeg-${FFMPEG_VERSION} \
@@ -24,7 +25,7 @@ RUN curl -fsSL https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz | tar
         --enable-cross-compile --cross-prefix=arm-linux-gnueabihf- --arch=armv7-a --target-os=linux \
         --enable-static --disable-shared --enable-pic \
         --disable-everything --disable-programs --disable-doc --disable-network \
-        --disable-avdevice --disable-avfilter --disable-swscale --disable-swresample \
+        --disable-avdevice --disable-avfilter --disable-swscale \
         --enable-decoder=ac3,eac3,dca \
     && make -j"$(nproc)" install \
     && rm -rf /tmp/ffmpeg-${FFMPEG_VERSION} \

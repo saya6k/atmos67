@@ -1,6 +1,8 @@
 //! Reads HDMI capture (S16LE PCM, stereo or 8-channel, carrying IEC 61937
 //! bursts) on stdin, decodes the audio and renders it to the given speaker
-//! layout, writing interleaved FLOAT32LE PCM on stdout.
+//! layout, writing interleaved FLOAT32LE PCM on stdout. Stereo capture that
+//! carries plain PCM instead (in any of the formats `pcm` reads) is played
+//! as a stereo bed.
 
 mod aes67;
 mod calibrate;
@@ -12,6 +14,7 @@ mod latency;
 mod layout;
 mod mat;
 mod measure;
+mod pcm;
 mod render;
 mod send;
 
@@ -27,11 +30,12 @@ use iec61937::{
     dts_hd_frame,
 };
 use layout::Layout;
-use render::Panner;
+use render::{BedMix, Panner};
 use openjoc_api::OpenJocConfig;
 use openjoc_scene::SpeakerLayout;
 
-const USAGE: &str = "usage: atmos67 (--layout PRESET | --layout-file LAYOUT.json) [--input-channels 2|8] [--input-rate HZ] < capture.s16le > speakers.f32le
+const USAGE: &str = "usage: atmos67 (--layout PRESET | --layout-file LAYOUT.json) [--input-channels 2|8] [--input-rate HZ]
+           [--input-format S16_LE|S32_LE|FLOAT_LE] < capture > speakers.f32le
        atmos67 (--layout PRESET | --layout-file LAYOUT.json) --aes67-sources > status.json
        atmos67 (--layout PRESET | --layout-file LAYOUT.json) --aes67-send --ptp-gmid ID [--ptp-domain N] [--aes67-address A.B.C.D] [--aes67-buffer-ms MS]
            [--dsp SECS_EXPORT_DIR] [--volume DB] [--control SOCKET] [--streams STREAMS.json] < speakers.f32le
@@ -77,6 +81,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let mut input_channels = 2usize;
     // HDMI carries compressed audio at four times the 48 kHz audio rate.
     let mut input_rate = 192_000u32;
+    let mut input_format = pcm::Format::S16;
     let mut print_sources = false;
     let mut send = false;
     let mut send_config = send::Config {
@@ -106,6 +111,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             "--layout-file" => speakers = Some(SpeakerLayout::from_json_file(value()?)?),
             "--input-channels" => input_channels = value()?.parse()?,
             "--input-rate" => input_rate = value()?.parse()?,
+            "--input-format" => input_format = pcm::Format::parse(&value()?).ok_or(USAGE)?,
             "--aes67-sources" => print_sources = true,
             "--aes67-send" => send = true,
             "--aes67-address" => send_config.address = value()?.parse()?,
@@ -143,7 +149,11 @@ fn run() -> Result<(), Box<dyn Error>> {
         }
     }
     let speakers = speakers.ok_or(USAGE)?;
-    if !matches!(input_channels, 2 | 8) || input_rate == 0 || send && send_config.gmid.is_empty() {
+    // Bitstreams come as 16-bit samples; other formats carry stereo PCM only.
+    let pcm_only = input_format != pcm::Format::S16;
+    if !matches!(input_channels, 2 | 8) || pcm_only && input_channels != 2 || input_rate == 0
+        || send && send_config.gmid.is_empty()
+    {
         return Err(USAGE.into());
     }
     let layout = Layout::from_openjoc(&speakers)?;
@@ -151,7 +161,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let config = OpenJocConfig::default().with_speaker_layout(speakers);
     // Output frames that `bytes` of capture last for.
     let frames_in = |bytes: u64| {
-        bytes / (input_channels as u64 * 2) * OUTPUT_RATE / u64::from(input_rate)
+        bytes / (input_channels * input_format.bytes()) as u64 * OUTPUT_RATE / u64::from(input_rate)
     };
     let joc = Joc::new(config)?;
     let info = joc.output_info();
@@ -211,6 +221,13 @@ fn run() -> Result<(), Box<dyn Error>> {
         frames: 0,
     };
     let mut capture = Capture::new(input_channels, input_rate);
+    // Plain PCM in stereo capture: told from bitstream in 16-bit capture, all
+    // of it otherwise.
+    let mut gate = (input_channels == 2 && !pcm_only).then(|| pcm::Gate::new(2, input_rate));
+    let mut stereo = if input_channels == 2 { Some(pcm::Stereo::new(input_format, input_rate)?) } else { None };
+    let stereo_bed = BedMix::new(&layout, &panner, &["FL", "FR"]);
+    let (mut pcm_bytes, mut pcm_frames) = (Vec::new(), Vec::new());
+    let mut pcm_reported = false;
     let mut chunk = [0u8; 16384];
     let mut decoded = Vec::new();
     let mut input_bytes = 0u64;
@@ -223,7 +240,29 @@ fn run() -> Result<(), Box<dyn Error>> {
             break;
         }
         input_bytes += n as u64;
-        capture.feed(&chunk[..n]);
+        if let Some(stereo) = &mut stereo {
+            pcm_bytes.clear();
+            match &mut gate {
+                Some(gate) => gate.feed(&chunk[..n], &mut pcm_bytes),
+                None => pcm_bytes.extend_from_slice(&chunk[..n]),
+            }
+            if !pcm_bytes.is_empty() {
+                // The bitstream has ended: what its decoders hold plays first.
+                if last_burst_at.take().is_some() {
+                    end_bitstream(&mut eac3, &mut ac3, &mut dts, &mut truehd, &mut decoded);
+                }
+                if !pcm_reported {
+                    eprintln!("atmos67: playing stereo PCM");
+                    pcm_reported = true;
+                }
+                pcm_frames.clear();
+                stereo.push(&pcm_bytes, &mut pcm_frames)?;
+                stereo_bed.mix(&pcm_frames, 2, &mut decoded);
+            }
+        }
+        if !pcm_only {
+            capture.feed(&chunk[..n]);
+        }
         while let Some((data_type, payload)) = capture.next_burst() {
             let result = match data_type {
                 DATA_TYPE_EAC3 => eac3.decode(payload, &layout, &panner, &mut decoded),
@@ -267,11 +306,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             }
         }
         if last_burst_at.is_some_and(|at| frames_in(input_bytes - at) > GAP_FRAMES) {
-            eac3.flush(&mut decoded);
-            for decoder in [&mut ac3, &mut dts].into_iter().flatten() {
-                decoder.reset();
-            }
-            truehd.reset();
+            end_bitstream(&mut eac3, &mut ac3, &mut dts, &mut truehd, &mut decoded);
             last_burst_at = None;
         }
         output.write(&decoded)?;
@@ -284,6 +319,21 @@ fn run() -> Result<(), Box<dyn Error>> {
     eac3.flush(&mut decoded);
     output.write(&decoded)?;
     Ok(())
+}
+
+/// Plays out what the decoders hold and forgets the stream, which has stopped.
+fn end_bitstream(
+    eac3: &mut Eac3,
+    ac3: &mut Option<Ffmpeg>,
+    dts: &mut Option<Ffmpeg>,
+    truehd: &mut TrueHd,
+    decoded: &mut Vec<f32>,
+) {
+    eac3.flush(decoded);
+    for decoder in [ac3, dts].into_iter().flatten() {
+        decoder.reset();
+    }
+    truehd.reset();
 }
 
 /// The libavcodec decoder in `slot`, created on first use.

@@ -101,6 +101,6 @@ container machine run --root -n linux-test -- sh /Users/saya6k/Projects/aes67/ta
 실기 없이 할 수 있는 것:
 
 - `SPEC.md` 갱신 여부 결정 후 커밋.
-- 미정: PCM(스테레오 음악, 메뉴 효과음)이 무음인 것을 그대로 둘지. 지금은 스펙의 "캡처 데이터를 그대로 출력하지 않는다"를 따랐다.
+- ~~미정: PCM(스테레오 음악, 메뉴 효과음)이 무음인 것을 그대로 둘지.~~ 2026-11-19: 스테레오 PCM을 FL, FR 베드로 내고 보정을 함께 적용하기로 했다(2.0·2.1 구성 때문). 리샘플은 atmos67이 FFmpeg로, 멀티채널은 지금처럼 Dolby Digital 트랜스코딩. `atmos67-run`은 `S16_LE`(2·8채널), `S32_LE`·`FLOAT_LE`(2채널)를 캡처한다. 실기에서 볼 것: Kodi가 PCM을 어떤 형식·레이트로 여는지(`cat /proc/asound/Loopback/pcm0p/sub0/hw_params`), 음악과 메뉴 효과음이 나는지, 패스스루와 PCM을 오갈 때 끊김이나 잡음이 없는지. armhf 이미지는 libswresample을 넣도록 `packaging/Dockerfile`을 고쳤으므로 다시 빌드해야 한다.
 - 미정: CamillaDSP(룸 보정)를 이 경로에 넣을지. 넣는다면 디코더와 송출기 사이의 파이프다.
 - 미정: 라이선스(`Cargo.toml`이 비어 있고, 바이너리에 FFmpeg LGPL이 정적으로 들어간다).

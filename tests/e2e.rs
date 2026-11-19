@@ -59,10 +59,11 @@ fn survives_a_corrupted_burst() {
 }
 
 #[test]
-fn pcm_input_becomes_silence_on_the_capture_clock() {
-    // 10,000 output frames' worth of plain PCM (16 input bytes per output frame).
+fn silent_pcm_plays_as_silence_on_the_capture_clock() {
+    // 10,000 output frames' worth of plain PCM at 192 kHz (16 input bytes per
+    // output frame), resampled: all of it, less what the filter holds back.
     let samples = run(&["--layout", "5.1"], &vec![0u8; 16 * 10_000]);
-    assert_eq!(samples.len(), (10_000 - MAX_LAG_FRAMES) * 6);
+    assert!((9_936 * 6..=10_000 * 6).contains(&samples.len()), "{} frames", samples.len() / 6);
     assert!(samples.iter().all(|s| *s == 0.0));
 }
 
@@ -71,10 +72,11 @@ fn silence_fills_the_gap_after_bursts_stop() {
     let mut input = SPDIF.to_vec();
     input.extend(vec![0u8; 16 * 8_000]);
     let samples = run(&["--layout", "5.1"], &input);
-    // Output follows the input clock (6 access units + 8,000 frames) minus the
-    // allowed lag; the decoder is flushed before the silence, not at the end.
-    let frames = 6 * 1536 + 8_000 - MAX_LAG_FRAMES;
-    assert_eq!(samples.len(), frames * 6);
+    // Output follows the input clock (6 access units + 8,000 frames), within
+    // the allowed lag; the decoder is flushed before the silence, not at the
+    // end. The silence after the bursts plays as PCM once it has lasted 50 ms.
+    let frames = 6 * 1536 + 8_000;
+    assert!(((frames - MAX_LAG_FRAMES) * 6..=frames * 6).contains(&samples.len()), "{} frames", samples.len() / 6);
     let decoded = (6 * 1536 + DRAIN_TAIL_FRAMES) * 6;
     assert!(samples[decoded - 1536 * 6..decoded].iter().any(|s| *s != 0.0));
     assert!(samples[decoded..].iter().all(|s| *s == 0.0));
@@ -119,10 +121,76 @@ fn eight_channel_capture_decodes_like_stereo() {
 }
 
 #[test]
-fn input_rate_sets_the_silence_clock() {
-    // At 48 kHz stereo input, one input frame (4 bytes) is one output frame.
+fn input_rate_sets_the_output_clock() {
+    // At 48 kHz stereo input, one input frame (4 bytes) is one output frame;
+    // the last may wait for more input.
     let samples = run(&["--layout", "5.1", "--input-rate", "48000"], &vec![0u8; 4 * 10_000]);
-    assert_eq!(samples.len(), (10_000 - MAX_LAG_FRAMES) * 6);
+    assert!((9_999 * 6..=10_000 * 6).contains(&samples.len()), "{} frames", samples.len() / 6);
+}
+
+/// 1 kHz on the left and 1.5 kHz on the right at 0.25, sampled at `rate`;
+/// neither is among `TONES`.
+fn stereo_tones(seconds: f64, rate: f64) -> Vec<f32> {
+    let tone = |hz: f64, i: usize| (0.25 * (2.0 * std::f64::consts::PI * hz * i as f64 / rate).sin()) as f32;
+    (0..(seconds * rate) as usize).flat_map(|i| [tone(1000.0, i), tone(1500.0, i)]).collect()
+}
+
+fn s16(samples: &[f32]) -> Vec<u8> {
+    samples.iter().flat_map(|s| ((s * 32_767.0).round() as i16).to_le_bytes()).collect()
+}
+
+/// Checks that the left and right PCM tones are in FL and FR alone of a 5.1
+/// output, over the 0.2 s from frame `start`.
+fn assert_stereo_tones_at(samples: &[f32], start: usize) {
+    for channel in 0..6 {
+        for (side, hz) in [(0, 1000.0), (1, 1500.0)] {
+            let amplitude = tone_in(samples, 6, channel, hz, start, 9_600);
+            if channel == side {
+                assert!((amplitude - 0.25).abs() < 0.002, "channel {channel}: {hz} Hz at {amplitude}");
+            } else {
+                assert!(amplitude < 0.0025, "channel {channel}: {hz} Hz leaks at {amplitude}");
+            }
+        }
+    }
+}
+
+#[test]
+fn stereo_pcm_plays_on_the_front_speakers() {
+    let input = s16(&stereo_tones(0.4, 48_000.0));
+    let samples = run(&["--layout", "5.1", "--input-rate", "48000"], &input);
+    assert!((19_199 * 6..=19_200 * 6).contains(&samples.len()), "{} frames", samples.len() / 6);
+    assert_stereo_tones_at(&samples, 4_800);
+}
+
+#[test]
+fn float_pcm_at_44_1_khz_is_resampled_to_48_khz() {
+    let input: Vec<u8> = stereo_tones(0.4, 44_100.0).iter().flat_map(|s| s.to_le_bytes()).collect();
+    let samples = run(&["--layout", "5.1", "--input-rate", "44100", "--input-format", "FLOAT_LE"], &input);
+    assert!((19_100 * 6..=19_200 * 6).contains(&samples.len()), "{} frames", samples.len() / 6);
+    assert_stereo_tones_at(&samples, 4_800);
+}
+
+#[test]
+fn a_bitstream_between_pcm_is_decoded_and_never_played_as_pcm() {
+    // 0.4 s of stereo PCM, the AC-3 tones (19,968 frames), 0.4 s of PCM, at 48 kHz.
+    let pcm = s16(&stereo_tones(0.4, 48_000.0));
+    let ac3 = include_bytes!("fixtures/tones-ac3-5.1.spdif");
+    let input = [&pcm[..], ac3, &pcm[..]].concat();
+    let samples = run(&["--layout", "5.1", "--input-rate", "48000"], &input);
+    let frames = samples.len() / 6;
+    assert!((19_200 + 19_968 + 19_200 - 6_000..=19_200 + 19_968 + 19_200).contains(&frames), "{frames} frames");
+    // Encoded data played as PCM would be loud noise.
+    let peak = samples.iter().fold(0f32, |m, s| m.max(s.abs()));
+    assert!(peak < 0.3, "peak {peak}");
+    assert_stereo_tones_at(&samples, 4_800);
+    // The AC-3 tones, each in its channel, and none of the PCM.
+    for (channel, hz) in TONES.iter().enumerate().filter(|(c, _)| *c != 3) {
+        let amplitude = tone_in(&samples, 6, channel, *hz, 19_200 + 4_800, 9_600);
+        assert!((amplitude - 0.25).abs() < 0.02, "channel {channel}: {hz} Hz at {amplitude}");
+    }
+    assert!(tone_in(&samples, 6, 0, 1000.0, 19_200 + 4_800, 9_600) < 0.0025);
+    // The PCM again at the end.
+    assert_stereo_tones_at(&samples, frames - 9_600 - 2_400);
 }
 
 /// Amplitude of the `hz` component of one channel between `start` and

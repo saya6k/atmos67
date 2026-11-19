@@ -110,14 +110,19 @@ while :; do
     format=$(echo "$state" | sed -n 's/^format: //p')
     channels=$(echo "$state" | sed -n 's/^channels: //p')
     rate=$(echo "$state" | sed -n 's/^rate: \([0-9]*\).*/\1/p')
-    # Passthrough arrives as 16-bit stereo or, for TrueHD and DTS-HD, 8 channels.
-    if [ "$format" != S16_LE ] || { [ "$channels" != 2 ] && [ "$channels" != 8 ]; }; then
-        sleep 0.2
-        continue
-    fi
-    arecord -q -D hw:Loopback,1,0 -t raw -f S16_LE -c "$channels" -r "$rate" \
+    # Passthrough arrives as 16-bit stereo or, for TrueHD and DTS-HD, 8
+    # channels. What Kodi plays itself (stereo music, menu sounds) arrives as
+    # stereo PCM in 16-bit, 32-bit or float samples at the source's rate.
+    case "$format:$channels" in
+        S16_LE:2 | S16_LE:8 | S32_LE:2 | FLOAT_LE:2) ;;
+        *)
+            sleep 0.2
+            continue
+            ;;
+    esac
+    arecord -q -D hw:Loopback,1,0 -t raw -f "$format" -c "$channels" -r "$rate" \
         --period-time=10000 --buffer-time=200000 --process-id-file "$pidfile" \
-        | atmos67 "$@" --input-channels "$channels" --input-rate "$rate" &
+        | atmos67 "$@" --input-channels "$channels" --input-rate "$rate" --input-format "$format" &
     while [ "$(cat "$params" 2>/dev/null)" = "$state" ] && kill -0 $! 2>/dev/null; do
         sleep 0.2
     done

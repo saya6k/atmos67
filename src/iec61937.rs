@@ -4,7 +4,7 @@
 //! a four-word preamble (Pa, Pb, Pc, Pd) followed by the payload, each 16-bit
 //! word holding two bitstream bytes most-significant first.
 
-const SYNC: [u8; 4] = [0x72, 0xF8, 0x1F, 0x4E]; // Pa = 0xF872, Pb = 0x4E1F as LE words
+pub const SYNC: [u8; 4] = [0x72, 0xF8, 0x1F, 0x4E]; // Pa = 0xF872, Pb = 0x4E1F as LE words
 const HEADER_BYTES: usize = 8;
 
 pub const DATA_TYPE_AC3: u8 = 0x01;

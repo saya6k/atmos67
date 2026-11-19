@@ -23,9 +23,9 @@
 
 ### 가정
 
-1. 출력은 항상 48 kHz다. 48 kHz가 아닌 콘텐츠(96/192 kHz TrueHD, 44.1 kHz DTS)는 FFmpeg/리샘플 없이 "미지원"으로 알리고 무음을 낸다.
-2. 캡처 형식은 실행 중 바뀌지 않는다. 사용자가 `arecord`로 고정하고 `atmos67`에 `--input-channels`(2 또는 8)와 `--input-rate`(기본 192000)로 알려 준다. 8채널 캡처에서는 8채널 전체에 실린 버스트(HBR: TrueHD, DTS-HD)와 앞 2채널에만 실린 버스트(AC-3, E-AC-3, DTS)를 모두 찾는다.
-3. 버스트가 없는 입력(LPCM)은 지금처럼 무음이다. 비트스트림을 PCM으로 오인해 스피커로 내보내는 사고를 막기 위해서다.
+1. 출력은 항상 48 kHz다. 48 kHz가 아닌 비트스트림 콘텐츠(96/192 kHz TrueHD, 44.1 kHz DTS)는 "미지원"으로 알리고 무음을 낸다. 스테레오 PCM은 FFmpeg의 libswresample로 48 kHz로 바꾼다(2026-11-19).
+2. 캡처 형식은 실행 중 바뀌지 않는다. 사용자가 `arecord`로 고정하고 `atmos67`에 `--input-channels`(2 또는 8), `--input-rate`(기본 192000), `--input-format`(`S16_LE` 기본, `S32_LE`, `FLOAT_LE`)으로 알려 준다. 16비트가 아닌 형식은 스테레오 PCM만 담는다. 8채널 캡처에서는 8채널 전체에 실린 버스트(HBR: TrueHD, DTS-HD)와 앞 2채널에만 실린 버스트(AC-3, E-AC-3, DTS)를 모두 찾는다.
+3. 스테레오 캡처의 PCM(Kodi가 직접 재생하는 음악과 메뉴 효과음)은 FL, FR 베드로 렌더해 보정을 함께 받는다(2026-11-19, `src/pcm.rs`). 비트스트림을 PCM으로 오인해 스피커로 내보내는 사고를 막기 위해, 16비트 캡처는 IEC 61937 동기 워드가 50 ms 넘게 없어야 PCM으로 보고, 비트스트림이 끝난 직후의 50 ms(마지막 버스트의 나머지가 들어 있다)는 내보내지 않는다. 8채널 캡처의 PCM과 멀티채널 PCM은 지금처럼 무음이다(Kodi가 멀티채널을 Dolby Digital로 트랜스코딩해 보낸다).
 4. FFmpeg는 libavcodec을 `ffmpeg-next` 크레이트로 링크해 쓴다(별도 프로세스가 아니라 패킷 단위 동기 디코딩). 빌드와 실행 환경에 FFmpeg 라이브러리가 필요해진다.
 5. LFE 채널은 배치에 `lfe` 역할 스피커가 있으면 그리로 보내고, 없으면 버린다. 베이스 매니지먼트는 송출기의 DSP가 맡는다(`tasks/dsp.md`).
 
@@ -43,7 +43,7 @@
 - Rust 1.99+(`rust-toolchain.toml`은 1.100.0), edition 2024, 단일 바이너리 크레이트
 - `openjoc-api`, `openjoc-scene` (git, 커밋 고정) — E-AC-3 JOC, 배치 파일 파싱
 - `truehd` (crates.io) — TrueHD 디코딩과 OAMD
-- `ffmpeg-next` (crates.io) + 시스템 FFmpeg 라이브러리 — AC-3, E-AC-3, DTS 계열
+- `ffmpeg-next` (crates.io) + 시스템 FFmpeg 라이브러리 — AC-3, E-AC-3, DTS 계열, 스테레오 PCM 리샘플(libswresample)
 - SECS 2R 공개 크레이트 (crates.io, AGPL-3.0-only) — 측정과 보정 계산 (`tasks/dsp.md`)
 
 ## Commands
@@ -102,7 +102,7 @@ pub fn next_burst(&mut self) -> Option<(u8, &[u8])> {
 
 - **Always**: 커밋 전 전체 시험 통과. 작업 하나에 커밋 하나, 그 작업이 건드린 파일만 스테이징. 지원 범위가 바뀌면 README 갱신. 디코딩하지 못한 구간은 무음.
 - **Ask first**: 위 Tech Stack 밖의 의존성 추가. OpenJOC나 truehd를 포크하거나 패치하는 일. 출력 형식·CLI의 호환을 깨는 변경. 이 스펙의 범위 변경.
-- **Never**: HDCP·DRM 우회. 디코딩되지 않은 비트스트림이나 캡처 데이터를 그대로 오디오로 출력. `samples/` 커밋. `samples/`의 설치 파일(.pkg, .msi) 실행.
+- **Never**: HDCP·DRM 우회. 디코딩되지 않은 비트스트림을 오디오로 출력. 캡처 데이터는 가정 3의 조건으로 PCM이라고 판단한 것만 출력한다. `samples/` 커밋. `samples/`의 설치 파일(.pkg, .msi) 실행.
 
 ## Success Criteria
 
