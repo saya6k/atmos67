@@ -24,7 +24,3 @@ secs-audio = "=0.26.0"
 # browser netaudio's own daemon uses, at its version.
 netaudio-core = { git = "https://github.com/chris-ritsen/network-audio-controller", tag = "v0.6.1" }
 mdns-sd = "=0.21.5"
-
-# rustc needs more than 10 GB of memory to optimize truehd, at any level.
-[profile.release.package.truehd]
-opt-level = 0
