@@ -468,18 +468,24 @@ fn play(
     if frames > MAX_PLAY_FRAMES {
         return Err(format!("{frames} frames given; at most {MAX_PLAY_FRAMES}"));
     }
-    let mut bytes = vec![0u8; count * frames * 4];
-    reader.read_exact(&mut bytes).map_err(|e| format!("reading frames: {e}"))?;
-    let mut samples: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
-    let size = PACKET_FRAMES * channels;
-    samples.resize(samples.len().div_ceil(size) * size, 0.0);
+    // Read a packet at a time, so a signal of minutes is held once.
+    let mut packets = VecDeque::with_capacity(frames.div_ceil(PACKET_FRAMES));
+    let mut bytes = vec![0u8; PACKET_FRAMES * channels * 4];
+    for start in (0..frames).step_by(PACKET_FRAMES) {
+        let bytes = &mut bytes[..(frames - start).min(PACKET_FRAMES) * channels * 4];
+        reader.read_exact(bytes).map_err(|e| format!("reading frames: {e}"))?;
+        let mut packet = Vec::with_capacity(PACKET_FRAMES * channels);
+        packet.extend(bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)));
+        packet.resize(PACKET_FRAMES * channels, 0.0);
+        packets.push_back(packet);
+    }
     let (done, finished) = mpsc::channel();
     {
         let mut measurement = measurement.lock().expect("sender does not panic");
         if !measurement.packets.is_empty() {
             return Err("already playing".into());
         }
-        measurement.packets = samples.chunks(size).map(<[f32]>::to_vec).collect();
+        measurement.packets = packets;
         if measurement.packets.is_empty() {
             return Ok(String::new());
         }

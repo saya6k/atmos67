@@ -9,7 +9,7 @@
 //! reports an overrun, samples are missing and every later sweep would seem
 //! to arrive early, so the recording is rejected as having a gap.
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Child, ChildStdout, Command, Stdio};
@@ -160,11 +160,16 @@ impl OutputSession for Output {
             return Err(AudioError::Cancelled);
         }
         let frames = interleaved.len() / usize::from(self.channels);
-        let mut socket = UnixStream::connect(&self.control)
+        let socket = UnixStream::connect(&self.control)
             .map_err(|e| backend_error(format!("sender control {}: {e}", self.control.display())))?;
-        let mut message = format!("play {} {frames}\n", self.channels).into_bytes();
-        message.extend(interleaved[..frames * usize::from(self.channels)].iter().flat_map(|s| s.to_le_bytes()));
-        socket.write_all(&message).map_err(backend_error)?;
+        // Streamed, not copied whole: the signal can be minutes long.
+        let mut writer = BufWriter::new(&socket);
+        writer.write_all(format!("play {} {frames}\n", self.channels).as_bytes()).map_err(backend_error)?;
+        for sample in &interleaved[..frames * usize::from(self.channels)] {
+            writer.write_all(&sample.to_le_bytes()).map_err(backend_error)?;
+        }
+        writer.flush().map_err(backend_error)?;
+        drop(writer);
         let mut reply = String::new();
         BufReader::new(socket).read_line(&mut reply).map_err(backend_error)?;
         if !reply.starts_with("ok") {
