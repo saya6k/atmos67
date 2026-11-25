@@ -352,14 +352,27 @@ fn speaker(layout: &Layout, name: &str) -> Option<usize> {
 /// to the front on its side. A surround joins the speaker at -3 dB when the
 /// bed has a channel for that speaker too, and keeps its level when it only
 /// moves, as the back pair of a 5.1(back) bed on side speakers. `None` where
-/// there is no standard rule (heights, wides) or no speaker to fold into.
+/// there is no standard rule (heights, wides), no speaker to fold into, or a
+/// speaker the rules do not know by name sits nearer than the one they pick:
+/// panning then keeps the channel on its own side of the room.
 fn fold(layout: &Layout, name: &str, bed: &[&str]) -> Option<Vec<(usize, f32)>> {
+    let direction = nominal_direction(name)?;
+    let closeness = |index: usize| dot(layout.speakers[index].direction, direction);
+    let nearest = (0..layout.speakers.len())
+        .filter(|i| !layout.speakers[*i].lfe)
+        .map(closeness)
+        .fold(f64::MIN, f64::max);
+    let is_nearest = |index: usize| closeness(index) > nearest - EDGE_TOLERANCE;
     let into = |target: &str| {
         let shared = bed.iter().any(|b| canonical(b) == target);
-        speaker(layout, target).map(|index| vec![(index, if shared { FOLD } else { 1.0 })])
+        let index = speaker(layout, target).filter(|i| is_nearest(*i))?;
+        Some(vec![(index, if shared { FOLD } else { 1.0 })])
     };
     match name {
-        "FC" => Some(vec![(speaker(layout, "FL")?, FOLD), (speaker(layout, "FR")?, FOLD)]),
+        "FC" => {
+            let (left, right) = (speaker(layout, "FL")?, speaker(layout, "FR")?);
+            (is_nearest(left) || is_nearest(right)).then(|| vec![(left, FOLD), (right, FOLD)])
+        }
         "Ls" => into("Lb").or_else(|| into("FL")),
         "Rs" => into("Rb").or_else(|| into("FR")),
         "Lb" => into("Ls").or_else(|| into("FL")),
@@ -594,6 +607,14 @@ mod tests {
         let back = ["FL", "FR", "FC", "LFE", "BL", "BR"];
         let (output, _) = mixed(&five_one, &back, &[0.0, 0.0, 0.0, 0.0, 1.0, 2.0]);
         assert_eq!(output, [0.0, 0.0, 0.0, 0.0, 1.0, 2.0]);
+    }
+
+    #[test]
+    fn a_nearer_speaker_with_an_unknown_name_keeps_the_surround_by_panning() {
+        let custom = layout(&[("Left", -30.0, 0.0), ("Right", 30.0, 0.0), ("SurL", -110.0, 0.0), ("SurR", 110.0, 0.0)]);
+        let (output, _) = mixed(&custom, &["FL", "FR", "SL", "SR"], &[0.0, 0.0, 1.0, 0.0]);
+        assert!(output[2] > output[0] && output[1] == 0.0 && output[3] == 0.0, "{output:?}");
+        assert!((power(&output) - 1.0).abs() < 1e-5);
     }
 
     #[test]
