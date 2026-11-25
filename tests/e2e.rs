@@ -193,6 +193,26 @@ fn a_bitstream_between_pcm_is_decoded_and_never_played_as_pcm() {
     assert_stereo_tones_at(&samples, frames - 9_600 - 2_400);
 }
 
+#[test]
+fn the_pcm_channel_marks_the_pcm_frames_alone() {
+    let pcm = s16(&stereo_tones(0.4, 48_000.0));
+    let ac3 = include_bytes!("fixtures/tones-ac3-5.1.spdif");
+    let input = [&pcm[..], ac3, &pcm[..]].concat();
+    let args = ["--layout", "5.1", "--input-rate", "48000"];
+    let plain = run(&args, &input);
+    let marked = run(&[&args[..], &["--pcm-channel"]].concat(), &input);
+    // The speakers as without the channel, and one more channel of 0 or 1.
+    assert_eq!(marked.len(), plain.len() / 6 * 7);
+    let frames: Vec<&[f32; 7]> = marked.as_chunks::<7>().0.iter().collect();
+    assert!(frames.iter().zip(plain.as_chunks::<6>().0).all(|(m, p)| m[..6] == p[..]));
+    assert!(frames.iter().all(|f| f[6] == 0.0 || f[6] == 1.0));
+    // PCM at the start and the end, the AC-3 tones between are not.
+    assert!(frames[4_800..19_000].iter().all(|f| f[6] == 1.0));
+    assert!(frames[19_200 + 4_800..19_200 + 14_400].iter().all(|f| f[6] == 0.0));
+    // The PCM at the end is shorter: the 50 ms after the bitstream is dropped.
+    assert!(frames[frames.len() - 6_000..].iter().all(|f| f[6] == 1.0));
+}
+
 /// Amplitude of the `hz` component of one channel between `start` and
 /// `start + len` frames, which must span whole cycles.
 fn tone_in(samples: &[f32], channels: usize, channel: usize, hz: f64, start: usize, len: usize) -> f64 {

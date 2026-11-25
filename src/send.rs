@@ -19,6 +19,11 @@
 //! leaves, ramped across the packet, so a change is heard at once without a
 //! click; a Unix socket takes `volume <dB>` and `mute 0|1` lines.
 //!
+//! With `--pcm-channel` each input frame ends with one more channel, which
+//! the decoder sets to 1.0 for plain PCM from the capture. Kodi has set the
+//! volume of that audio itself, so those frames are sent without the volume
+//! or the mute; the switch falls on the frame.
+//!
 //! Without a stream plan the channels go out in order, 8 to a stream, on
 //! consecutive addresses. A plan (`--streams`, JSON) names each stream, its
 //! address and the output channels it carries, by speaker name in either
@@ -90,6 +95,8 @@ pub struct Config {
     pub control: Option<PathBuf>,
     /// Which channels go in which stream; 8 at a time in order without one.
     pub streams: Option<PathBuf>,
+    /// Input frames end with a channel marking plain PCM.
+    pub pcm_channel: bool,
 }
 
 struct Stream {
@@ -101,9 +108,13 @@ struct Stream {
     sdp: String,
 }
 
-/// Packets of `PACKET_FRAMES` interleaved frames waiting to be sent.
+/// `PACKET_FRAMES` interleaved frames, and which of them are plain PCM
+/// (none when the input carries no PCM channel).
+type Packet = (Vec<f32>, Vec<bool>);
+
+/// Packets waiting to be sent.
 struct Queue {
-    packets: VecDeque<Vec<f32>>,
+    packets: VecDeque<Packet>,
     /// stdin reached its end.
     closed: bool,
 }
@@ -273,7 +284,8 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
     ));
     {
         let queue = Arc::clone(&queue);
-        thread::spawn(move || read_packets(channels_in, design, buffer + QUEUE_SLACK, &queue));
+        let pcm_channel = config.pcm_channel;
+        thread::spawn(move || read_packets(channels_in, pcm_channel, design, buffer + QUEUE_SLACK, &queue));
     }
 
     let silence = vec![0f32; PACKET_FRAMES * channels];
@@ -353,16 +365,16 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
         };
         status.playing.store(packet.is_some(), Ordering::Relaxed);
         let target = f32::from_bits(gain.load(Ordering::Relaxed));
-        let samples = match (measured.as_deref(), packet.as_deref()) {
+        let samples = match (measured.as_deref(), packet.as_ref()) {
             (Some(measured), _) => measured,
             (None, packet) => match packet {
-            Some(packet) if current != 1.0 || target != 1.0 => {
+            Some((packet, pcm)) if current != 1.0 || target != 1.0 => {
                 scaled.clear();
                 scaled.extend_from_slice(packet);
-                ramp(&mut scaled, channels, current, target);
+                ramp(&mut scaled, channels, current, target, pcm);
                 &scaled
             }
-            Some(packet) => packet,
+            Some((packet, _)) => packet,
             None => &silence,
             },
         };
@@ -403,22 +415,37 @@ pub fn run(channels_in: usize, names: &[String], config: &Config, design: Option
 /// Moves stdin into `queue` one packet at a time, through `design` when
 /// there is one, waiting while it holds `limit` packets. Input short of a
 /// whole packet, or of a whole design block, at the end is dropped.
-fn read_packets(channels: usize, mut design: Option<Design>, limit: usize, queue: &(Mutex<Queue>, Condvar)) {
+fn read_packets(
+    channels: usize,
+    pcm_channel: bool,
+    mut design: Option<Design>,
+    limit: usize,
+    queue: &(Mutex<Queue>, Condvar),
+) {
     let (lock, wake) = queue;
     let mut stdin = io::stdin().lock();
-    let mut bytes = vec![0u8; PACKET_FRAMES * channels * 4];
+    let width = channels + usize::from(pcm_channel);
+    let mut bytes = vec![0u8; PACKET_FRAMES * width * 4];
     let mut corrected = Vec::new();
+    // Whether each input frame not yet out of the design is PCM. The design
+    // gives out frame for frame what it takes, a block at a time.
+    let mut marks = VecDeque::new();
     let mut taken = 0;
     while stdin.read_exact(&mut bytes).is_ok() {
-        let input: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
+        let mut input: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
+        if pcm_channel {
+            marks.extend(input.chunks_exact(width).map(|frame| frame[channels] > 0.5));
+            input = input.chunks_exact(width).flat_map(|frame| &frame[..channels]).copied().collect();
+        }
         let packets = match &mut design {
-            None => vec![input],
+            None => vec![(input, marks.drain(..).collect())],
             Some(design) => {
                 design.push(&input, &mut corrected);
                 let size = PACKET_FRAMES * design.outputs.len();
                 let mut packets = Vec::new();
                 while corrected.len() - taken >= size {
-                    packets.push(corrected[taken..taken + size].to_vec());
+                    let pcm = marks.drain(..marks.len().min(PACKET_FRAMES)).collect();
+                    packets.push((corrected[taken..taken + size].to_vec(), pcm));
                     taken += size;
                 }
                 corrected.drain(..taken);
@@ -496,9 +523,13 @@ fn play(
     finished.recv().map_err(|_| "the sender stopped".to_string())?.map(|started| started.to_string())
 }
 
-/// Scales `samples` from `from` to `to` across the packet, frame by frame.
-fn ramp(samples: &mut [f32], channels: usize, from: f32, to: f32) {
+/// Scales `samples` from `from` to `to` across the packet, frame by frame,
+/// except the frames `pcm` marks.
+fn ramp(samples: &mut [f32], channels: usize, from: f32, to: f32, pcm: &[bool]) {
     for (n, frame) in samples.chunks_exact_mut(channels).enumerate() {
+        if pcm.get(n) == Some(&true) {
+            continue;
+        }
         let gain = from + (to - from) * (n + 1) as f32 / PACKET_FRAMES as f32;
         frame.iter_mut().for_each(|s| *s *= gain);
     }
@@ -689,9 +720,18 @@ mod tests {
     #[test]
     fn ramp_reaches_the_new_gain_at_the_end_of_the_packet() {
         let mut samples = vec![1.0; PACKET_FRAMES * 2];
-        ramp(&mut samples, 2, 1.0, 0.5);
+        ramp(&mut samples, 2, 1.0, 0.5, &[]);
         assert!((samples[0] - (1.0 - 0.5 / 48.0)).abs() < 1e-6);
         assert_eq!(samples[PACKET_FRAMES * 2 - 2..], [0.5, 0.5]);
+    }
+
+    #[test]
+    fn ramp_leaves_pcm_frames_as_they_are() {
+        let mut samples = vec![1.0; PACKET_FRAMES];
+        let pcm: Vec<bool> = (0..PACKET_FRAMES).map(|n| n >= 40).collect();
+        ramp(&mut samples, 1, 0.5, 0.5, &pcm);
+        assert_eq!(samples[39], 0.5);
+        assert!(samples[40..].iter().all(|s| *s == 1.0));
     }
 
     #[test]
@@ -737,6 +777,7 @@ mod tests {
             volume_db: 0.0,
             control: None,
             streams: None,
+            pcm_channel: false,
         };
         let sdp = sdp(
             "atmos67 ch 9-12",
@@ -765,6 +806,7 @@ mod tests {
             volume_db: 0.0,
             control: None,
             streams: None,
+            pcm_channel: false,
         };
         let version = |channels: usize| {
             let sdp = sdp("s", 7, Ipv4Addr::new(10, 0, 0, 2), Ipv4Addr::new(239, 69, 67, 1), channels, &config);

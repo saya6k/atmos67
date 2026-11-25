@@ -95,13 +95,15 @@ rm -f "$pidfile"
 # The sender reads the decoded speakers from this FIFO. It is stopped by
 # ending that input: it plays out what it holds, withdraws its streams with
 # SAP deletions and exits. systemd signals only this script (KillMode=mixed).
+# A last channel marks the PCM Kodi has already set the volume of, which the
+# sender then sends without its own.
 fifo=$run/speakers
 rm -f "$fifo"
 mkfifo "$fifo"
 # shellcheck disable=SC2086
 atmos67 "$@" --aes67-send --aes67-address "$ADDRESS" --aes67-buffer-ms "$BUFFER_MS" \
     --ptp-gmid "$gmid" --ptp-domain "$PTP_DOMAIN" \
-    --control "$run/control" --volume "${VOLUME_DB:-0}" $dsp $streams < "$fifo" &
+    --control "$run/control" --volume "${VOLUME_DB:-0}" --pcm-channel $dsp $streams < "$fifo" &
 sender=$!
 
 (
@@ -122,7 +124,7 @@ while :; do
     esac
     arecord -q -D hw:Loopback,1,0 -t raw -f "$format" -c "$channels" -r "$rate" \
         --period-time=10000 --buffer-time=200000 --process-id-file "$pidfile" \
-        | atmos67 "$@" --input-channels "$channels" --input-rate "$rate" --input-format "$format" &
+        | atmos67 "$@" --input-channels "$channels" --input-rate "$rate" --input-format "$format" --pcm-channel &
     while [ "$(cat "$params" 2>/dev/null)" = "$state" ] && kill -0 $! 2>/dev/null; do
         sleep 0.2
     done

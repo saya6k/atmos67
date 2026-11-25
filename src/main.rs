@@ -35,10 +35,10 @@ use openjoc_api::OpenJocConfig;
 use openjoc_scene::SpeakerLayout;
 
 const USAGE: &str = "usage: atmos67 (--layout PRESET | --layout-file LAYOUT.json) [--input-channels 2|8] [--input-rate HZ]
-           [--input-format S16_LE|S32_LE|FLOAT_LE] < capture > speakers.f32le
+           [--input-format S16_LE|S32_LE|FLOAT_LE] [--pcm-channel] < capture > speakers.f32le
        atmos67 (--layout PRESET | --layout-file LAYOUT.json) --aes67-sources > status.json
        atmos67 (--layout PRESET | --layout-file LAYOUT.json) --aes67-send --ptp-gmid ID [--ptp-domain N] [--aes67-address A.B.C.D] [--aes67-buffer-ms MS]
-           [--dsp SECS_EXPORT_DIR] [--volume DB] [--control SOCKET] [--streams STREAMS.json] < speakers.f32le
+           [--dsp SECS_EXPORT_DIR] [--volume DB] [--control SOCKET] [--streams STREAMS.json] [--pcm-channel] < speakers.f32le
        atmos67 (--layout PRESET | --layout-file LAYOUT.json) --write-design DIR [--base SECS_EXPORT_DIR]
            [--subs N] [--crossover front|center|surround|back|top=HZ]... [--slope 12|24]
            [--trim ROLE=DB]... [--delay ROLE=MS]...
@@ -92,6 +92,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         volume_db: 0.0,
         control: None,
         streams: None,
+        pcm_channel: false,
     };
     let mut dsp = None;
     let mut write_design = None;
@@ -122,6 +123,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             "--volume" => send_config.volume_db = value()?.parse()?,
             "--control" => send_config.control = Some(value()?.into()),
             "--streams" => send_config.streams = Some(value()?.into()),
+            "--pcm-channel" => send_config.pcm_channel = true,
             "--dsp-only" => dsp_only = true,
             "--write-design" => write_design = Some(std::path::PathBuf::from(value()?)),
             "--base" => base = Some(std::path::PathBuf::from(value()?)),
@@ -209,15 +211,17 @@ fn run() -> Result<(), Box<dyn Error>> {
         return send::run(info.channel_count, &names, &send_config, design);
     }
     eprintln!(
-        "atmos67: output {} channels [{}], FLOAT32LE",
-        info.channel_count,
-        info.channel_labels.join(" ")
+        "atmos67: output {} channels [{}{}], FLOAT32LE",
+        info.channel_count + usize::from(send_config.pcm_channel),
+        info.channel_labels.join(" "),
+        if send_config.pcm_channel { " PCM" } else { "" }
     );
 
     let mut stdin = io::stdin().lock();
     let mut output = Output {
         out: io::stdout().lock(),
         channels: info.channel_count,
+        pcm_channel: send_config.pcm_channel,
         frames: 0,
     };
     let mut capture = Capture::new(input_channels, input_rate);
@@ -251,6 +255,8 @@ fn run() -> Result<(), Box<dyn Error>> {
                 if last_burst_at.take().is_some() {
                     end_bitstream(&mut eac3, &mut ac3, &mut dts, &mut truehd, &mut decoded);
                 }
+                output.write(&decoded, false)?;
+                decoded.clear();
                 if !pcm_reported {
                     eprintln!("atmos67: playing stereo PCM");
                     pcm_reported = true;
@@ -258,6 +264,8 @@ fn run() -> Result<(), Box<dyn Error>> {
                 pcm_frames.clear();
                 stereo.push(&pcm_bytes, &mut pcm_frames)?;
                 stereo_bed.mix(&pcm_frames, 2, &mut decoded);
+                output.write(&decoded, true)?;
+                decoded.clear();
             }
         }
         if !pcm_only {
@@ -309,7 +317,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             end_bitstream(&mut eac3, &mut ac3, &mut dts, &mut truehd, &mut decoded);
             last_burst_at = None;
         }
-        output.write(&decoded)?;
+        output.write(&decoded, false)?;
         decoded.clear();
         // The sink downstream runs on the capture clock. Whenever no audio was
         // decoded (pause, PCM source, dropped bursts), fill the gap with silence.
@@ -317,7 +325,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         output.write_silence(due.saturating_sub(output.frames))?;
     }
     eac3.flush(&mut decoded);
-    output.write(&decoded)?;
+    output.write(&decoded, false)?;
     Ok(())
 }
 
@@ -347,13 +355,24 @@ fn libav(slot: &mut Option<Ffmpeg>, id: Id) -> Result<&mut Ffmpeg, String> {
 struct Output<W> {
     out: W,
     channels: usize,
+    /// Each frame ends with one more channel: 1.0 when the frame is plain PCM
+    /// from the capture, which Kodi has already set the volume of, else 0.0.
+    pcm_channel: bool,
     frames: u64,
 }
 
 impl<W: Write> Output<W> {
-    fn write(&mut self, samples: &[f32]) -> io::Result<()> {
+    fn write(&mut self, samples: &[f32], pcm: bool) -> io::Result<()> {
         if !samples.is_empty() {
-            let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+            let mark = if pcm { 1.0f32 } else { 0.0 };
+            let bytes: Vec<u8> = if self.pcm_channel {
+                samples
+                    .chunks_exact(self.channels)
+                    .flat_map(|frame| frame.iter().chain([&mark]).flat_map(|s| s.to_le_bytes()))
+                    .collect()
+            } else {
+                samples.iter().flat_map(|s| s.to_le_bytes()).collect()
+            };
             self.out.write_all(&bytes)?;
             self.out.flush()?;
             self.frames += (samples.len() / self.channels) as u64;
@@ -363,7 +382,8 @@ impl<W: Write> Output<W> {
 
     fn write_silence(&mut self, frames: u64) -> io::Result<()> {
         if frames > 0 {
-            self.out.write_all(&vec![0u8; frames as usize * self.channels * 4])?;
+            let channels = self.channels + usize::from(self.pcm_channel);
+            self.out.write_all(&vec![0u8; frames as usize * channels * 4])?;
             self.out.flush()?;
             self.frames += frames;
         }

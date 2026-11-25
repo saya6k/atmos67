@@ -265,6 +265,30 @@ fn takes_volume_commands_on_its_socket() {
 }
 
 #[test]
+fn sends_the_frames_marked_pcm_without_its_volume() {
+    let _ports = PORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let first = Ipv4Addr::new(239, 69, 67, 241);
+    let ports = listen(first, 2);
+    let child = spawn(first, &["--volume", "-20", "--pcm-channel"]);
+    // The first half of the frames is a bitstream's, the second plain PCM;
+    // the switch falls inside a packet.
+    let input = input();
+    let switch = PACKETS * 48 / 2 + 7;
+    let marked: Vec<f32> = input
+        .as_chunks::<CHANNELS>().0.iter()
+        .enumerate()
+        .flat_map(|(n, frame)| frame.iter().copied().chain([if n < switch { 0.0 } else { 1.0 }]))
+        .collect();
+    let received = receive(ports, child, &[8, 4], &marked);
+    let expected: Vec<f32> = input
+        .as_chunks::<CHANNELS>().0.iter()
+        .enumerate()
+        .flat_map(|(n, frame)| frame.iter().map(move |s| if n < switch { s * 0.1 } else { *s }))
+        .collect();
+    check(&received, &[8, 4], &expected, 1);
+}
+
+#[test]
 fn plays_measurement_frames_from_its_socket_in_place_of_the_program() {
     let _ports = PORTS.lock().unwrap_or_else(|e| e.into_inner());
     let socket = std::env::temp_dir().join(format!("atmos67-play-{}", std::process::id()));
