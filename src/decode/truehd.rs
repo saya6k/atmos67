@@ -156,7 +156,7 @@ fn schedule(mix: &mut ObjectMix, payload: &ObjectAudioMetadataPayload, layout: &
                 10f32.powf(f32::from(*gain) / 20.0)
             };
             let mut target = if let Some(bed) = beds.get(object) {
-                channel_gains(layout, panner, bed)
+                channel_gains(layout, panner, bed, &beds)
             } else if object < beds.len() + program.num_isf_objects {
                 // Intermediate spatial format channels are not rendered.
                 vec![0.0; layout.speakers.len()]

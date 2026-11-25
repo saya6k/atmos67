@@ -259,6 +259,9 @@ impl ObjectMix {
 /// A named channel within this angle of a speaker goes to that speaker alone.
 const SNAP_DEGREES: f64 = 5.0;
 
+/// The ITU-R BS.775 downmix coefficient, -3 dB.
+const FOLD: f32 = std::f32::consts::FRAC_1_SQRT_2;
+
 /// Fixed routing of named input channels (a channel bed) onto a layout.
 pub struct BedMix {
     /// For each input channel, the (output, gain) pairs it feeds.
@@ -275,7 +278,7 @@ impl BedMix {
         let routes = channels
             .iter()
             .map(|label| {
-                let route = route(layout, panner, label);
+                let route = route(layout, panner, label, channels);
                 if route.is_empty() {
                     dropped.push((*label).to_owned());
                 }
@@ -307,9 +310,9 @@ impl BedMix {
     }
 }
 
-/// The (output, gain) pairs a named channel feeds; empty when it has
-/// nowhere to go.
-fn route(layout: &Layout, panner: &Panner, label: &str) -> Vec<(usize, f32)> {
+/// The (output, gain) pairs a named channel of `bed` feeds; empty when it
+/// has nowhere to go.
+fn route(layout: &Layout, panner: &Panner, label: &str, bed: &[&str]) -> Vec<(usize, f32)> {
     let name = canonical(label);
     if name == "LFE" {
         // Each of N subwoofers plays 1/N, so together they sound like one.
@@ -317,27 +320,58 @@ fn route(layout: &Layout, panner: &Panner, label: &str) -> Vec<(usize, f32)> {
         let share = 1.0 / subs.len().max(1) as f32;
         return subs.into_iter().map(|index| (index, share)).collect();
     }
-    let named = |s: &crate::layout::Speaker| !s.lfe && canonical(&s.name) == name;
-    if let Some(index) = layout.speakers.iter().position(named) {
+    if let Some(index) = speaker(layout, name) {
         return vec![(index, 1.0)];
+    }
+    if let Some(route) = fold(layout, name, bed) {
+        return route;
     }
     let Some(direction) = nominal_direction(name) else {
         return Vec::new();
     };
-    let near = |s: &crate::layout::Speaker| {
-        !s.lfe && dot(s.direction, direction) > SNAP_DEGREES.to_radians().cos()
-    };
-    if let Some(index) = layout.speakers.iter().position(near) {
-        return vec![(index, 1.0)];
-    }
     let gains = panner.gains(direction);
     (0..gains.len()).filter(|i| gains[*i] > 0.0).map(|i| (i, gains[i])).collect()
 }
 
-/// Per-output gains for a named channel, as `route` gives them.
-pub fn channel_gains(layout: &Layout, panner: &Panner, label: &str) -> Vec<f32> {
+/// The speaker that plays channel `name` as it is: one of that name, or one
+/// within `SNAP_DEGREES` of where the channel belongs.
+fn speaker(layout: &Layout, name: &str) -> Option<usize> {
+    let named = |s: &crate::layout::Speaker| !s.lfe && canonical(&s.name) == name;
+    layout.speakers.iter().position(named).or_else(|| {
+        let direction = nominal_direction(name)?;
+        let near = |s: &crate::layout::Speaker| {
+            !s.lfe && dot(s.direction, direction) > SNAP_DEGREES.to_radians().cos()
+        };
+        layout.speakers.iter().position(near)
+    })
+}
+
+/// The standard downmix (ITU-R BS.775, Dolby Lo/Ro and 7.1 to 5.1) of a
+/// channel with no speaker of its own: the centre splits between the fronts,
+/// a side or back surround goes to the other surround on its side, or else
+/// to the front on its side. A surround joins the speaker at -3 dB when the
+/// bed has a channel for that speaker too, and keeps its level when it only
+/// moves, as the back pair of a 5.1(back) bed on side speakers. `None` where
+/// there is no standard rule (heights, wides) or no speaker to fold into.
+fn fold(layout: &Layout, name: &str, bed: &[&str]) -> Option<Vec<(usize, f32)>> {
+    let into = |target: &str| {
+        let shared = bed.iter().any(|b| canonical(b) == target);
+        speaker(layout, target).map(|index| vec![(index, if shared { FOLD } else { 1.0 })])
+    };
+    match name {
+        "FC" => Some(vec![(speaker(layout, "FL")?, FOLD), (speaker(layout, "FR")?, FOLD)]),
+        "Ls" => into("Lb").or_else(|| into("FL")),
+        "Rs" => into("Rb").or_else(|| into("FR")),
+        "Lb" => into("Ls").or_else(|| into("FL")),
+        "Rb" => into("Rs").or_else(|| into("FR")),
+        _ => None,
+    }
+}
+
+/// Per-output gains for a named channel of `bed`, as `route` gives them.
+pub fn channel_gains(layout: &Layout, panner: &Panner, label: &str, bed: &[&str]) -> Vec<f32> {
     let mut gains = vec![0.0; layout.speakers.len()];
-    for (index, gain) in route(layout, panner, label) {
+    for (index, gain) in route(layout, panner, label, bed) {
         gains[index] = gain;
     }
     gains
@@ -517,14 +551,57 @@ mod tests {
             ("Ls", -110.0, 0.0),
             ("Rs", 110.0, 0.0),
         ]);
+        // At -3 dB, since the side channel plays there too, and none of it
+        // on the right.
         let only_back_left = [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
         let (output, _) = mixed(&five_one, &SEVEN_ONE, &only_back_left);
-        assert!(output[4] > 0.9, "{output:?}");
-        assert!(output[..4].iter().all(|g| *g == 0.0));
+        assert_eq!(output, [0.0, 0.0, 0.0, 0.0, FOLD, 0.0]);
         // The side channel matches the surround speaker by name, not angle.
         let only_side_left = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
         let (output, _) = mixed(&five_one, &SEVEN_ONE, &only_side_left);
         assert_eq!(output, [0.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn a_five_one_bed_on_stereo_is_the_itu_downmix() {
+        let stereo = layout(&[("FL", -30.0, 0.0), ("FR", 30.0, 0.0)]);
+        let bed = ["FL", "FR", "FC", "LFE", "SL", "SR"];
+        let gains = |channel: usize| {
+            let mut input = [0.0; 6];
+            input[channel] = 1.0;
+            mixed(&stereo, &bed, &input).0
+        };
+        assert_eq!(gains(0), [1.0, 0.0]);
+        assert_eq!(gains(2), [FOLD, FOLD]);
+        assert_eq!(gains(3), [0.0, 0.0]);
+        assert_eq!(gains(4), [FOLD, 0.0]);
+        assert_eq!(gains(5), [0.0, FOLD]);
+        // A 7.1 bed folds its back pair into the fronts the same way.
+        let (output, _) = mixed(&stereo, &SEVEN_ONE, &[0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        assert_eq!(output, [0.0, FOLD]);
+    }
+
+    #[test]
+    fn a_back_pair_alone_moves_to_the_side_speakers_at_full_level() {
+        let five_one = layout(&[
+            ("FL", -30.0, 0.0),
+            ("FR", 30.0, 0.0),
+            ("FC", 0.0, 0.0),
+            ("LFE", 0.0, 0.0),
+            ("Ls", -110.0, 0.0),
+            ("Rs", 110.0, 0.0),
+        ]);
+        let back = ["FL", "FR", "FC", "LFE", "BL", "BR"];
+        let (output, _) = mixed(&five_one, &back, &[0.0, 0.0, 0.0, 0.0, 1.0, 2.0]);
+        assert_eq!(output, [0.0, 0.0, 0.0, 0.0, 1.0, 2.0]);
+    }
+
+    #[test]
+    fn heights_without_speakers_are_still_panned() {
+        let stereo = layout(&[("FL", -30.0, 0.0), ("FR", 30.0, 0.0), ("FC", 0.0, 0.0)]);
+        let (output, dropped) = mixed(&stereo, &["TFL"], &[1.0]);
+        assert!(dropped.is_empty());
+        assert!(output[0] > output[1] && (power(&output) - 1.0).abs() < 1e-5, "{output:?}");
     }
 
     #[test]
