@@ -17,8 +17,8 @@ serde_json = "1"
 # SECS 2R measures and designs the room correction. AGPL-3.0-only; atmos67
 # is GPL-3.0-only and conveys the combination under GPLv3 section 13. The
 # audio crate is SECS's measurement device seam, at the API's own version.
-secs = { package = "sound-equalization-and-correction-system-rust-api", version = "=0.25.2" }
-secs-audio = "=0.25.2"
+secs = { package = "sound-equalization-and-correction-system-rust-api", version = "=0.26.0" }
+secs-audio = "=0.26.0"
 # Dante receivers: netaudio's reverse-engineered control protocol
 # (Unlicense, not on crates.io, pinned to a release tag) and the mDNS
 # browser netaudio's own daemon uses, at its version.
