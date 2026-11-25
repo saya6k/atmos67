@@ -383,7 +383,7 @@ mod tests {
         dir
     }
 
-    /// The layouts the Kodi add-on offers (packaging/kodi/…/settings.xml).
+    /// The layouts the Kodi add-on offers (kodi-extras: addons/service.atmos67/resources/settings.xml).
     pub const ADDON_PRESETS: [&str; 12] =
         ["2.0", "5.1", "5.1.2", "5.1.4", "7.1", "7.1.2", "7.1.4", "7.1.6", "9.1", "9.1.2", "9.1.4", "9.1.6"];
 

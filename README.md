@@ -143,16 +143,18 @@ Vero V의 커널은 서명된 모듈만 받기 때문에(`CONFIG_MODULE_SIG_FORC
 
 ### 빌드
 
-Docker가 있는 Linux(arm64 또는 amd64)에서 OSMC의 userland(Debian bullseye, armhf)용으로 교차 빌드합니다. FFmpeg는 필요한 디코더(AC-3, E-AC-3, DTS)만 넣어 정적으로 링크합니다.
+패키지(`.deb`)와 Kodi 애드온은 Kodi 애드온 모노레포 `kodi-extras`에 있습니다(2026-11-25에 이 저장소에서 옮겼습니다). 애드온은 `addons/service.atmos67/`, 패키징(deb 트리, Dockerfile, 빌드 스크립트)은 `packages/atmos67/`에 있습니다. 패키지는 이 저장소의 커밋 하나(`packages/atmos67/aes67-source`의 `AES67_REV`)를 꺼내 빌드하므로, 여기서 고친 것을 패키지에 넣으려면 커밋한 뒤 그 값을 바꿉니다.
+
+Docker가 있는 Linux(arm64 또는 amd64)에서 OSMC의 userland(Debian bullseye, armhf)용으로 교차 빌드합니다. FFmpeg는 필요한 디코더(AC-3, E-AC-3, DTS)만 넣어 정적으로 링크합니다. `kodi-extras`에서:
 
 ```sh
-docker build -t atmos67-armhf packaging
-docker run --rm -v "$PWD":/work atmos67-armhf packaging/build.sh
+docker build -t atmos67-armhf packages/atmos67
+docker run --rm -v "$PWD":/work -v ~/Projects/aes67:/aes67:ro -w /work atmos67-armhf packages/atmos67/build.sh
 ```
 
 시험이 armhf 바이너리를 실행하므로 커널에 32비트 ARM용 qemu가 등록돼 있어야 합니다(Docker Desktop은 돼 있고, 아니면 `docker run --privileged --rm tonistiigi/binfmt --install arm`).
 
-`target/packages/`에 `atmos67_<버전>_armhf.deb`와 `service.atmos67-<버전>.zip`이 생깁니다.
+`packages/atmos67/out/`에 `atmos67_<버전>_armhf.deb`와 `service.atmos67-<버전>.zip`이 생깁니다.
 
 ### 설치
 
@@ -173,17 +175,24 @@ sudo apt install ./atmos67_0.1.0_armhf.deb     # Vero V에서. alsa-utils, linux
 
 ### 64비트 바이너리 (시험용)
 
-Vero V는 userland가 32비트(armhf)지만 커널은 arm64입니다. 그래서 userland에 기대는 것이 없는 완전 정적 aarch64 바이너리를 패키지의 `/usr/bin/atmos67` 대신 쓸 수 있을 것으로 봅니다. 64비트로 돌면 더 빠를 것으로 기대하지만, 실기에서 확인하지 않았습니다. arm64 Linux에서 다음처럼 만듭니다.
+Vero V는 userland가 32비트(armhf)지만 커널은 arm64입니다. 그래서 userland에 기대는 것이 없는 완전 정적 aarch64 바이너리를 패키지의 `/usr/bin/atmos67` 대신 쓸 수 있을 것으로 봅니다. 64비트로 돌면 더 빠를 것으로 기대하지만, 실기에서 확인하지 않았습니다. arm64 Linux에서 `kodi-extras`로 다음처럼 만듭니다.
 
 ```sh
-docker build -t atmos67-aarch64 -f packaging/Dockerfile.aarch64 packaging
-docker run --rm -v "$PWD":/work atmos67-aarch64 packaging/build-aarch64.sh
+docker build -t atmos67-aarch64 -f packages/atmos67/Dockerfile.aarch64 packages/atmos67
+docker run --rm -v "$PWD":/work -v ~/Projects/aes67:/aes67:ro -w /work atmos67-aarch64 packages/atmos67/build-aarch64.sh
 ```
 
-결과는 `target/packages-aarch64/atmos67-<버전>-aarch64`입니다. musl로 정적 링크하고, FFmpeg는 armhf 패키지와 같은 구성입니다.
+결과는 `packages/atmos67/out/atmos67-<버전>-aarch64`입니다. musl로 정적 링크하고, FFmpeg는 armhf 패키지와 같은 구성입니다.
 
 - **확인한 것** (M1 VM): 시험(단위, `tests/e2e.rs`, `tests/send.rs`, `tests/samples.rs`)이 통과합니다. armhf Debian bullseye 컨테이너(arm64 커널)에서도 돕니다. 출력은 같은 머신의 동적 빌드와 바이트 단위로 같고, 속도도 같습니다. 32비트 바이너리와는 출력이 조금 다릅니다. 부동소수점 계산 경로가 다르기 때문입니다.
-- **Vero V에서 비교하기**: `bench/`에 60초 입력 두 개를 함께 둡니다(`target/packages-aarch64/bench/`). 둘 다 Vero V로 옮긴 뒤 다음을 실행합니다.
+- **Vero V에서 비교하기**: 60초 입력 두 개를 FFmpeg로 만들어(아래, "시험"의 샘플 파일) 바이너리와 함께 Vero V로 옮긴 뒤 비교합니다.
+
+  ```sh
+  ffmpeg -ss 120 -t 60 -i "samples/Audio Test Files/Dolby Atmos TrueHD, E-AC-3 7.1.4.mkv" -map 0:a:0 -c copy -f spdif truehd-atmos-60s.spdif
+  ffmpeg -t 60 -i "samples/Audio Test Files/Dolby Atmos E-AC-3 5.1.2.mp4" -map 0:a:0 -c copy -f spdif eac3-joc-60s.spdif
+  ```
+
+  Vero V에서:
 
   ```sh
   for b in /usr/bin/atmos67 ./atmos67-0.1.0-aarch64; do

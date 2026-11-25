@@ -2,6 +2,8 @@
 
 2026-11-13 기준. 사용법은 README의 "OSMC (Vero V) 패키지" 절에 있고, 이 문서는 이어서 작업할 때 필요한 결정·사실·남은 일을 적는다.
 
+> **2026-11-25: 패키징을 `kodi-extras`로 옮겼다.** 아래의 `packaging/…`은 이제 `kodi-extras`의 `packages/atmos67/…`(deb 트리, `Dockerfile`, `build.sh`, `Dockerfile.aarch64`, `build-aarch64.sh`)와 `addons/service.atmos67/`(애드온), `tests/test_atmos67.py`(애드온 시험)다. 패키지는 이 저장소의 커밋(`packages/atmos67/aes67-source`의 `AES67_REV`)을 꺼내 빌드한다.
+
 ## 상태
 
 - `.deb`와 Kodi 애드온 zip이 빌드되고 컨테이너 시험을 통과했다. **Vero V 실기에서는 아무것도 돌려 보지 않았다.**
