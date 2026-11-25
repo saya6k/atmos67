@@ -106,6 +106,8 @@
 | 스테레오 PCM에 볼륨이 두 번 걸렸다(Kodi와 송출기). 실기에서 확인하지는 않았다. | `--pcm-channel`: 디코더가 PCM 프레임을 표시하는 채널을 하나 더 쓰고, 송출기는 그 프레임에 볼륨과 음소거를 걸지 않는다. 표시는 FIFO와 보정을 프레임째 따라가므로 바뀌는 지점이 정확하다. |
 | `play`가 측정 신호를 세 벌 잡았다(12채널 3분이면 약 1.2 GB). | 패킷 단위로 읽어 한 벌만 잡는다. 측정 쪽도 신호를 복사하지 않고 소켓으로 흘려 보낸다. |
 
-검증(`linux-test`, `rust:alpine`, 디버그): 단위 80, `tests/e2e.rs` 16, `tests/send.rs` 6(루프백 멀티캐스트, `--network none`) 통과. clippy(`-D warnings`) 경고 없음. 릴리스, armv7, `tests/samples.rs`, `tests/calibrate.rs`는 돌리지 않았다.
+검증(`linux-test`, `rust:alpine`, 디버그): 단위 80, `tests/e2e.rs` 16, `tests/send.rs` 6(루프백 멀티캐스트, `--network none`) 통과. clippy(`-D warnings`) 경고 없음.
+
+릴리스로 다시(같은 날): 단위 80, `tests/e2e.rs` 16, `tests/send.rs` 6(루프백 멀티캐스트), `tests/calibrate.rs`(`--ignored`, 110초) 통과. `secs_parity`(`--ignored`)는 `target/secs-parity`의 지난 설계를 지우고 SECS 2R 0.26.0으로 다시 설계해 통과. armv7은 `packaging/build.sh`로 단위 80, e2e 16, send 6 통과, `.deb` 설치 시험(`target/pkgtest-inner.sh`)도 통과. `tests/samples.rs`는 `samples/`가 없어 12개 모두 건너뛰었으므로 확인하지 않은 것이다.
 
 실기에서 볼 것: Kodi가 PCM에 소프트웨어 볼륨을 실제로 거는지(위 셋째 문제의 전제), 그리고 볼륨 키가 PCM과 패스스루에서 같은 크기로 들리는지.
