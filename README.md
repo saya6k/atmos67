@@ -143,13 +143,13 @@ Vero V의 커널은 서명된 모듈만 받기 때문에(`CONFIG_MODULE_SIG_FORC
 
 ### 빌드
 
-패키지(`.deb`)와 Kodi 애드온은 Kodi 애드온 모노레포 `kodi-extras`에 있습니다(2026-11-25에 이 저장소에서 옮겼습니다). 애드온은 `addons/service.atmos67/`, 패키징(deb 트리, Dockerfile, 빌드 스크립트)은 `packages/atmos67/`에 있습니다. 패키지는 이 저장소의 커밋 하나(`packages/atmos67/aes67-source`의 `AES67_REV`)를 꺼내 빌드하므로, 여기서 고친 것을 패키지에 넣으려면 커밋한 뒤 그 값을 바꿉니다.
+패키지(`.deb`)와 Kodi 애드온은 Kodi 애드온 모노레포 `kodi-extras`에 있습니다(2026-11-25에 이 저장소에서 옮겼습니다). 애드온은 `addons/service.atmos67/`, 패키징(deb 트리, Dockerfile, 빌드 스크립트)은 `packages/atmos67/`에 있습니다. 패키지는 이 저장소의 커밋 하나(`packages/atmos67/atmos67-source`의 `ATMOS67_REV`)를 꺼내 빌드하므로, 여기서 고친 것을 패키지에 넣으려면 커밋한 뒤 그 값을 바꿉니다.
 
 Docker가 있는 Linux(arm64 또는 amd64)에서 OSMC의 userland(Debian bullseye, armhf)용으로 교차 빌드합니다. FFmpeg는 필요한 디코더(AC-3, E-AC-3, DTS)만 넣어 정적으로 링크합니다. `kodi-extras`에서:
 
 ```sh
 docker build -t atmos67-armhf packages/atmos67
-docker run --rm -v "$PWD":/work -v ~/Projects/aes67:/aes67:ro -w /work atmos67-armhf packages/atmos67/build.sh
+docker run --rm -v "$PWD":/work -v ~/Projects/atmos67:/atmos67:ro -w /work atmos67-armhf packages/atmos67/build.sh
 ```
 
 시험이 armhf 바이너리를 실행하므로 커널에 32비트 ARM용 qemu가 등록돼 있어야 합니다(Docker Desktop은 돼 있고, 아니면 `docker run --privileged --rm tonistiigi/binfmt --install arm`).
@@ -179,7 +179,7 @@ Vero V는 userland가 32비트(armhf)지만 커널은 arm64입니다. 그래서 
 
 ```sh
 docker build -t atmos67-aarch64 -f packages/atmos67/Dockerfile.aarch64 packages/atmos67
-docker run --rm -v "$PWD":/work -v ~/Projects/aes67:/aes67:ro -w /work atmos67-aarch64 packages/atmos67/build-aarch64.sh
+docker run --rm -v "$PWD":/work -v ~/Projects/atmos67:/atmos67:ro -w /work atmos67-aarch64 packages/atmos67/build-aarch64.sh
 ```
 
 결과는 `packages/atmos67/out/atmos67-<버전>-aarch64`입니다. musl로 정적 링크하고, FFmpeg는 armhf 패키지와 같은 구성입니다.

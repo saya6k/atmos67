@@ -2,7 +2,7 @@
 
 2026-11-13 기준. 사용법은 README의 "OSMC (Vero V) 패키지" 절에 있고, 이 문서는 이어서 작업할 때 필요한 결정·사실·남은 일을 적는다.
 
-> **2026-11-25: 패키징을 `kodi-extras`로 옮겼다.** 아래의 `packaging/…`은 이제 `kodi-extras`의 `packages/atmos67/…`(deb 트리, `Dockerfile`, `build.sh`, `Dockerfile.aarch64`, `build-aarch64.sh`)와 `addons/service.atmos67/`(애드온), `tests/test_atmos67.py`(애드온 시험)다. 패키지는 이 저장소의 커밋(`packages/atmos67/aes67-source`의 `AES67_REV`)을 꺼내 빌드한다.
+> **2026-11-25: 패키징을 `kodi-extras`로 옮겼다.** 아래의 `packaging/…`은 이제 `kodi-extras`의 `packages/atmos67/…`(deb 트리, `Dockerfile`, `build.sh`, `Dockerfile.aarch64`, `build-aarch64.sh`)와 `addons/service.atmos67/`(애드온), `tests/test_atmos67.py`(애드온 시험)다. 패키지는 이 저장소의 커밋(`packages/atmos67/atmos67-source`의 `ATMOS67_REV`)을 꺼내 빌드한다.
 
 ## 상태
 
@@ -50,9 +50,9 @@ Kodi ─> hdmi_atmos67 (루프백 재생) ─> arecord (hw:Loopback,1,0) ─> at
 
 ```sh
 # VM 재부팅 후 한 번: 32비트 ARM용 qemu 등록 (시험이 armhf 바이너리를 실행한다)
-container machine run --root -n linux-test -- sh /Users/saya6k/Projects/aes67/target/binfmt.sh
+container machine run --root -n linux-test -- sh /Users/saya6k/Projects/atmos67/target/binfmt.sh
 # 이미지 빌드, 시험, 패키지 조립, 설치 시험. 결과는 target/packages/
-container machine run --root -n linux-test -- sh /Users/saya6k/Projects/aes67/target/pkg.sh
+container machine run --root -n linux-test -- sh /Users/saya6k/Projects/atmos67/target/pkg.sh
 ```
 
 - `target/armhf.sh [스크립트]`: 교차 빌드 컨테이너에서 스크립트를 돌린다. `target/clippy-inner.sh`가 clippy.
