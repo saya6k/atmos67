@@ -73,11 +73,13 @@ container machine run --root -n linux-test -- sh /Users/saya6k/Projects/aes67/ta
 - `tests/calibrate.rs`는 멀티캐스트를 루프백에 둔 컨테이너에서 통과했다(README "시험"). 컨테이너 네트워크로 내보내면 VM 쪽에서 송출이 멈춰 측정이 거부된다.
 - armv7(패키지 대상)로도 확인했다(2026-11-19, 스테레오 PCM 지원까지 넣은 `ad0dc9a`): libswresample을 넣어 이미지를 다시 빌드했고, armhf 바이너리로 단위 78, `tests/e2e.rs` 15, `tests/send.rs` 5 통과. `.deb`(6.7 MB) 설치, 공유 라이브러리는 libc 계열뿐(GLIBC 2.30 이하), 서비스 스크립트가 FIFO로 송출기를 띄워 3초에 RTP 3001패킷과 SDP를 내고, 수동 보정 13채널과 osmc 그룹 제어 소켓이 동작했다. `tests/samples.rs`와 캘리브레이션 E2E는 armhf로 돌리지 않았다.
 
+2026-11-25 (`--pcm-channel` 등 `tasks/review.md`의 수정 뒤): armhf로 단위 80, `tests/e2e.rs` 16, `tests/send.rs` 6 통과, `.deb` 설치 시험 통과. arm64 네이티브 릴리스로 `tests/samples.rs` 12, `tests/calibrate.rs`, `secs_parity` 통과.
+
 ## 남은 일
 
 실기가 있어야 하는 것부터.
 
-1. **설치와 장치 확인.** Vero V에서:
+1. **설치와 장치 확인.** Vero V에서(측정 마이크는 앞면 USB 포트):
    ```sh
    uname -r; dpkg --print-architecture
    sudo apt install ./atmos67_0.1.0_armhf.deb
@@ -92,15 +94,15 @@ container machine run --root -n linux-test -- sh /Users/saya6k/Projects/aes67/ta
    `ethtool -T eth0`으로 PTP 하드웨어 타임스탬프를 확인한다(2026-11-19, 실기가 없어 아직 모른다). `hardware-transmit`·`hardware-receive`가 있고 `PTP Hardware Clock`이 번호면 지원한다. 그러면 `atmos67-ptp4l`이 `ptp4l -H`로, `atmos67-phc2sys`가 `phc2sys -a -rr`로 돌아야 한다(`systemctl status`의 명령줄). `software-*`만 있고 `PTP Hardware Clock: none`이면 `ptp4l -S`다. 근거: 커널에 `CONFIG_PTP_1588_CLOCK=y`, `CONFIG_STMMAC_ETH=y`가 있고, S905X4의 Synopsys 이더넷 MAC은 보통 IEEE 1588 타임스탬프를 갖는다(일반 지식, 이 칩에서 확인하지 않음). 정밀도는 보통 하드웨어 1 µs 안쪽, 소프트웨어 수십 µs이며 수신기가 잠기는지가 실제 기준이다.
 
    송출기 로그에서 `the timeline was N ms off the clock`(루프가 100 ms 넘게 밀림)과 `input ran N ms ahead`(입력이 버퍼보다 앞서 버림)가 얼마나 나오는지도 본다. 앞의 것이 측정 중에 나면 그 측정은 거부된다.
-2. **Kodi.** 애드온 설치 → 장치 목록에 `atmos67 (AES67)`이 보이는지 → "Kodi 오디오 출력을 atmos67로 설정"이 통하는지 → 포맷별 재생 중 `cat /proc/asound/Loopback/pcm0p/sub0/hw_params`와 `journalctl -u atmos67 -f`. 장치가 안 보이거나 HD 포맷 패스스루가 안 되면 OSMC의 ALSA 싱크 패치를 살펴야 한다.
-3. **성능.** 가장 큰 위험이다. 실기에서 `atmos67`에 파일을 넣어 실시간 대비 속도를 잰다(README "성능"의 방식, `target/bench.sh` 참고). TrueHD는 `truehd` 크레이트를 최적화 없이 빌드한 상태다. 모자라면: 메모리 넉넉한 머신에서 `truehd`를 최적화해 빌드, 또는 64비트 userland 여부 재확인.
+2. **Kodi.** 애드온 설치 → 장치 목록에 `atmos67 (AES67)`이 보이는지 → "Kodi 오디오 출력을 atmos67로 설정"이 통하는지 → 포맷별 재생 중 `cat /proc/asound/Loopback/pcm0p/sub0/hw_params`와 `journalctl -u atmos67 -f`. 장치가 안 보이거나 HD 포맷 패스스루가 안 되면 OSMC의 ALSA 싱크 패치를 살펴야 한다. 스테레오 PCM에 Kodi가 볼륨을 거는지(`--pcm-channel`의 전제)와, 볼륨 키로 PCM과 패스스루가 같은 크기로 들리는지도 본다.
+3. **성능.** 가장 큰 위험이다. 실기에서 `atmos67`에 파일을 넣어 실시간 대비 속도를 잰다(README "성능"의 방식, `target/bench.sh` 참고). TrueHD는 `truehd` 크레이트를 최적화 없이 빌드한 상태다. 모자라면: 메모리 넉넉한 머신에서 `truehd`를 최적화해 빌드, 또는 커널이 arm64이므로 정적 링크한 aarch64 바이너리를 armhf userland에서 돌리기(확인하지 않음). 스피커 수는 부하에 거의 영향이 없다(2026-11-25 VM에서 2→48채널에 TrueHD Atmos는 그대로, E-AC-3 JOC는 40 % 증가, README "스피커 수와 부하").
 4. **포맷 전환.** 캡처 재시작이 실제로 되는지, `arecord`가 깔끔히 끝나는지.
 5. **수신기.** 실제 AES67 수신기가 SAP를 보고 잠기는지, PTP 역할(그랜드마스터/슬레이브)과 시스템 시각·NTP 충돌.
 6. **지연.** 버퍼 100 ms가 끊김 없이 충분한지, Kodi 오디오 오프셋 값.
 
 실기 없이 할 수 있는 것:
 
-- `SPEC.md` 갱신 여부 결정 후 커밋.
-- ~~미정: PCM(스테레오 음악, 메뉴 효과음)이 무음인 것을 그대로 둘지.~~ 2026-11-19: 스테레오 PCM을 FL, FR 베드로 내고 보정을 함께 적용하기로 했다(2.0·2.1 구성 때문). 리샘플은 atmos67이 FFmpeg로, 멀티채널은 지금처럼 Dolby Digital 트랜스코딩. `atmos67-run`은 `S16_LE`(2·8채널), `S32_LE`·`FLOAT_LE`(2채널)를 캡처한다. 실기에서 볼 것: Kodi가 PCM을 어떤 형식·레이트로 여는지(`cat /proc/asound/Loopback/pcm0p/sub0/hw_params`), 음악과 메뉴 효과음이 나는지, 패스스루와 PCM을 오갈 때 끊김이나 잡음이 없는지. armhf 이미지는 libswresample을 넣도록 `packaging/Dockerfile`을 고쳤으므로 다시 빌드해야 한다.
-- 미정: CamillaDSP(룸 보정)를 이 경로에 넣을지. 넣는다면 디코더와 송출기 사이의 파이프다.
-- 미정: 라이선스(`Cargo.toml`이 비어 있고, 바이너리에 FFmpeg LGPL이 정적으로 들어간다).
+- ~~`SPEC.md` 갱신 여부 결정 후 커밋.~~ SPEC 머리에 범위 변경을 적었다.
+- ~~미정: PCM(스테레오 음악, 메뉴 효과음)이 무음인 것을 그대로 둘지.~~ 2026-11-19: 스테레오 PCM을 FL, FR 베드로 내고 보정을 함께 적용하기로 했다(2.0·2.1 구성 때문). 리샘플은 atmos67이 FFmpeg로, 멀티채널은 지금처럼 Dolby Digital 트랜스코딩. `atmos67-run`은 `S16_LE`(2·8채널), `S32_LE`·`FLOAT_LE`(2채널)를 캡처한다. 실기에서 볼 것: Kodi가 PCM을 어떤 형식·레이트로 여는지(`cat /proc/asound/Loopback/pcm0p/sub0/hw_params`), 음악과 메뉴 효과음이 나는지, 패스스루와 PCM을 오갈 때 끊김이나 잡음이 없는지. armhf 이미지는 libswresample을 넣어 다시 빌드했다(위 "확인한 것").
+- ~~미정: CamillaDSP(룸 보정)를 이 경로에 넣을지.~~ 넣지 않고 송출기가 SECS 2R 엔진으로 보정한다(`tasks/dsp.md`).
+- ~~미정: 라이선스.~~ GPL-3.0-only(`LICENSE`, README "라이선스").

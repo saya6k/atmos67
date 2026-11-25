@@ -4,7 +4,7 @@
 
 `atmos67`은 HDMI 캡처(IEC 61937 비트스트림이 실린 PCM)를 stdin으로 받아, 설정한 임의 스피커 배치에 맞춘 48 kHz FLOAT32LE PCM을 stdout으로 내보내는 필터다. 뒤에 CamillaDSP(룸 보정)와 aes67-linux-daemon(AES67 송출)이 붙는다. 사용자는 Orange Pi(RK3588) 한 대로 이 체인을 돌리려는 개인 사용자다.
 
-> **범위 변경 (2026-11-17).** 실행 대상이 OSMC Vero V로 바뀌었다(`tasks/vero-v.md`). AES67 송출은 atmos67이 직접 하고(`--aes67-send`), 룸 보정·베이스 매니지먼트·볼륨도 CamillaDSP 대신 atmos67이 SECS 2R 엔진으로 맡는다(`tasks/dsp.md`). 아래 본문은 디코딩 범위의 원래 스펙이다.
+> **범위 변경 (2026-11-17).** 실행 대상이 OSMC Vero V로 바뀌었다(`tasks/vero-v.md`). AES67 송출은 atmos67이 직접 하고(`--aes67-send`), 룸 보정·베이스 매니지먼트·볼륨도 CamillaDSP 대신 atmos67이 SECS 2R 엔진으로 맡는다(`tasks/dsp.md`). 아래 본문은 디코딩 범위의 원래 스펙이다. 지금 상태(지원 장비, 시험 결과, 남은 일)는 README와 `tasks/vero-v.md`에 있다.
 
 지금은 E-AC-3 JOC만 디코딩되고 나머지는 무음이다. 이 스펙의 목표는 **HDMI로 올 수 있는 포맷마다 소리가 맞는 스피커에서 나게 하는 것**이다.
 
