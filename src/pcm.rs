@@ -60,8 +60,8 @@ pub struct Gate {
     pending: Vec<u8>,
     /// Bytes fed so far, to keep what is given out on frame boundaries.
     position: u64,
-    /// Bytes since the last sync word, if one has been seen.
-    since_sync: Option<usize>,
+    /// A sync word has been seen.
+    synced: bool,
     pcm: bool,
 }
 
@@ -69,7 +69,7 @@ impl Gate {
     pub fn new(channels: usize, rate: u32) -> Self {
         let frame = channels * 2;
         let quiet = (u64::from(rate) * QUIET_MS / 1000) as usize * frame;
-        Self { frame, quiet, pending: Vec::new(), position: 0, since_sync: None, pcm: false }
+        Self { frame, quiet, pending: Vec::new(), position: 0, synced: false, pcm: false }
     }
 
     /// Takes the next capture bytes and appends what is PCM to `out`, in
@@ -77,34 +77,41 @@ impl Gate {
     pub fn feed(&mut self, bytes: &[u8], out: &mut Vec<u8>) {
         self.pending.extend_from_slice(bytes);
         self.position += bytes.len() as u64;
-        let syncs = || (0..self.pending.len().saturating_sub(3)).step_by(2).filter(|&i| self.pending[i..i + 4] == SYNC);
-        if let Some(last) = syncs().next_back() {
+        // Sync words start on 16-bit samples of the capture. A read may end
+        // mid-sample, so `pending` need not start on one.
+        let first_sample = ((self.position - self.pending.len() as u64) % 2) as usize;
+        let first_sync = (first_sample..self.pending.len().saturating_sub(3))
+            .step_by(2)
+            .find(|&i| self.pending[i..i + 4] == SYNC);
+        if let Some(first) = first_sync {
             if self.pcm {
-                let first = syncs().next().expect("there is a last");
                 self.give(first, out);
             }
             self.pcm = false;
-            self.since_sync = Some(self.pending.len() - last);
-            self.pending.clear();
+            self.synced = true;
+            self.drop_all_but_a_split_sync();
             return;
-        }
-        if let Some(since) = &mut self.since_sync {
-            *since += bytes.len();
         }
         if !self.pcm {
             if self.pending.len() < self.quiet {
                 return;
             }
             self.pcm = true;
-            if self.since_sync.is_some() {
+            if self.synced {
                 // The end of the last burst, its stuffing and the start of
                 // the PCM: none of it can be told apart, so none is played.
-                self.pending.clear();
+                self.drop_all_but_a_split_sync();
                 return;
             }
         }
-        // A sync word may be split across feeds: its first bytes wait.
         self.give(self.pending.len().saturating_sub(SYNC.len() - 1), out);
+    }
+
+    /// Drops what is pending except the bytes that may begin a sync word
+    /// split across feeds.
+    fn drop_all_but_a_split_sync(&mut self) {
+        let keep = self.pending.len().min(SYNC.len() - 1);
+        self.pending.drain(..self.pending.len() - keep);
     }
 
     /// Gives out the first `len` pending bytes as whole frames and drops the
@@ -249,9 +256,30 @@ mod tests {
 
     #[test]
     fn a_bitstream_with_short_gaps_never_becomes_pcm() {
-        let gap = vec![0; (QUIET_FRAMES - 100) * 4];
+        // Sync to sync well within the 50 ms.
+        let gap = vec![0; (QUIET_FRAMES - 300) * 4];
         let input = [burst(600), gap.clone(), burst(600), gap.clone(), burst(600)].concat();
-        assert!(run(&mut Gate::new(2, 48_000), &input, 1000).is_empty());
+        // At any split, including through a sync word.
+        for piece in [1000, 7, 4093] {
+            assert!(run(&mut Gate::new(2, 48_000), &input, piece).is_empty(), "pieces of {piece}");
+        }
+    }
+
+    #[test]
+    fn a_bitstream_read_in_odd_pieces_never_becomes_pcm() {
+        // E-AC-3 at 192 kHz stereo: a burst and its stuffing every 32 ms.
+        let mut period = burst(4096);
+        period.resize(6144 * 4, 0);
+        let input = period.repeat(20);
+        for first in [1, 3, 4097] {
+            let mut gate = Gate::new(2, 192_000);
+            let mut out = Vec::new();
+            gate.feed(&input[..first], &mut out);
+            for chunk in input[first..].chunks(16_384) {
+                gate.feed(chunk, &mut out);
+            }
+            assert!(out.is_empty(), "first read of {first}: {} bytes given out", out.len());
+        }
     }
 
     #[test]
