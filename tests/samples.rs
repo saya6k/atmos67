@@ -21,9 +21,12 @@ fn ffmpeg(input: &PathBuf, stream: &str, output: &[&str]) -> Vec<u8> {
 }
 
 /// Runs FFmpeg on `seconds` of one stream of `input`, starting at `start`.
+/// Decodes keep the samples the container marks to skip (the 1024 of codec
+/// delay a `.dtshd` header gives): IEC 61937 carries no such mark, so atmos67
+/// plays them.
 fn ffmpeg_at(input: &PathBuf, start: &str, seconds: &str, stream: &str, output: &[&str]) -> Vec<u8> {
     let out = Command::new("ffmpeg")
-        .args(["-v", "error", "-ss", start, "-t", seconds, "-i"])
+        .args(["-v", "error", "-flags2", "+skip_manual", "-ss", start, "-t", seconds, "-i"])
         .arg(input)
         .args(["-map", stream])
         .args(output)

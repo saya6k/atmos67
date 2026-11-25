@@ -108,6 +108,6 @@
 
 검증(`linux-test`, `rust:alpine`, 디버그): 단위 80, `tests/e2e.rs` 16, `tests/send.rs` 6(루프백 멀티캐스트, `--network none`) 통과. clippy(`-D warnings`) 경고 없음.
 
-릴리스로 다시(같은 날): 단위 80, `tests/e2e.rs` 16, `tests/send.rs` 6(루프백 멀티캐스트), `tests/calibrate.rs`(`--ignored`, 110초) 통과. `secs_parity`(`--ignored`)는 `target/secs-parity`의 지난 설계를 지우고 SECS 2R 0.26.0으로 다시 설계해 통과. armv7은 `packaging/build.sh`로 단위 80, e2e 16, send 6 통과, `.deb` 설치 시험(`target/pkgtest-inner.sh`)도 통과. `tests/samples.rs`는 `samples/`가 없어 12개 모두 건너뛰었으므로 확인하지 않은 것이다.
+릴리스로 다시(같은 날): 단위 80, `tests/e2e.rs` 16, `tests/send.rs` 6(루프백 멀티캐스트), `tests/calibrate.rs`(`--ignored`, 110초) 통과. `secs_parity`(`--ignored`)는 `target/secs-parity`의 지난 설계를 지우고 SECS 2R 0.26.0으로 다시 설계해 통과. armv7은 `packaging/build.sh`로 단위 80, e2e 16, send 6 통과, `.deb` 설치 시험(`target/pkgtest-inner.sh`)도 통과. `tests/samples.rs`(`--ignored`)는 12개 통과. 처음에는 DTS-HD High Resolution 7.1이 병합 전 코드에서도 실패했다: FFmpeg 8.1.3의 `dtshd` 디먹서가 파일 헤더의 코덱 지연 1024 샘플을 기준 디코드에서 잘라 내는데, IEC 61937에는 그 표시가 없어 atmos67은 그 샘플도 낸다(1024 프레임 늦춰 보면 비트 단위로 같다). 기준 디코드에 `-flags2 +skip_manual`을 주어 자르지 않게 했다. 11-19에 통과한 것은 FFmpeg 8.0이 자르지 않았기 때문으로 보지만 확인하지 않았다.
 
 실기에서 볼 것: Kodi가 PCM에 소프트웨어 볼륨을 실제로 거는지(위 셋째 문제의 전제), 그리고 볼륨 키가 PCM과 패스스루에서 같은 크기로 들리는지.
