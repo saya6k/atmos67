@@ -95,7 +95,7 @@ container machine run --root -n linux-test -- sh /Users/saya6k/Projects/aes67/ta
 
    송출기 로그에서 `the timeline was N ms off the clock`(루프가 100 ms 넘게 밀림)과 `input ran N ms ahead`(입력이 버퍼보다 앞서 버림)가 얼마나 나오는지도 본다. 앞의 것이 측정 중에 나면 그 측정은 거부된다.
 2. **Kodi.** 애드온 설치 → 장치 목록에 `atmos67 (AES67)`이 보이는지 → "Kodi 오디오 출력을 atmos67로 설정"이 통하는지 → 포맷별 재생 중 `cat /proc/asound/Loopback/pcm0p/sub0/hw_params`와 `journalctl -u atmos67 -f`. 장치가 안 보이거나 HD 포맷 패스스루가 안 되면 OSMC의 ALSA 싱크 패치를 살펴야 한다. 스테레오 PCM에 Kodi가 볼륨을 거는지(`--pcm-channel`의 전제)와, 볼륨 키로 PCM과 패스스루가 같은 크기로 들리는지도 본다.
-3. **성능.** 가장 큰 위험이다. 실기에서 `atmos67`에 파일을 넣어 실시간 대비 속도를 잰다(README "성능"의 방식, `target/bench.sh` 참고). `truehd`는 2026-11-25부터 최적화해 빌드한다(rustc 1.100에서 메모리 약 1.3 GB, VM에서 TrueHD Atmos가 약 4배 빨라짐). 가장 느린 경로는 E-AC-3 JOC(M1 VM에서 실시간의 4배 안팎)다. 모자라면: 커널이 arm64이므로 정적 링크한 aarch64 바이너리를 armhf userland에서 돌리기(확인하지 않음). 스피커 수는 부하에 거의 영향이 없다(2026-11-25 VM에서 2→48채널에 TrueHD Atmos는 그대로, E-AC-3 JOC는 40 % 증가, README "스피커 수와 부하").
+3. **성능.** 가장 큰 위험이다. 실기에서 `atmos67`에 파일을 넣어 실시간 대비 속도를 잰다(README "성능"의 방식, `target/bench.sh` 참고). `truehd`는 2026-11-25부터 최적화해 빌드한다(rustc 1.100에서 메모리 약 1.3 GB, VM에서 TrueHD Atmos가 약 4배 빨라짐). 가장 느린 경로는 E-AC-3 JOC(M1 VM에서 실시간의 4배 안팎)다. 32비트 패키지 바이너리와 정적 aarch64 바이너리(`packaging/build-aarch64.sh`, README "64비트 바이너리 (시험용)")를 같은 입력(`target/packages-aarch64/bench/`)으로 재서 비교한다. aarch64 바이너리는 VM의 armhf bullseye 컨테이너에서 도는 것까지 확인했다(2026-11-25). 스피커 수는 부하에 거의 영향이 없다(2026-11-25 VM에서 2→48채널에 TrueHD Atmos는 그대로, E-AC-3 JOC는 40 % 증가, README "스피커 수와 부하").
 4. **포맷 전환.** 캡처 재시작이 실제로 되는지, `arecord`가 깔끔히 끝나는지.
 5. **수신기.** 실제 AES67 수신기가 SAP를 보고 잠기는지, PTP 역할(그랜드마스터/슬레이브)과 시스템 시각·NTP 충돌.
 6. **지연.** 버퍼 100 ms가 끊김 없이 충분한지, Kodi 오디오 오프셋 값.

@@ -171,6 +171,30 @@ sudo apt install ./atmos67_0.1.0_armhf.deb     # Vero V에서. alsa-utils, linux
 
 애드온 없이 쓰려면 `/etc/atmos67/atmos67.conf`를 고치고 `sudo systemctl restart atmos67`을 합니다.
 
+### 64비트 바이너리 (시험용)
+
+Vero V는 userland가 32비트(armhf)지만 커널은 arm64입니다. 그래서 userland에 기대는 것이 없는 완전 정적 aarch64 바이너리를 패키지의 `/usr/bin/atmos67` 대신 쓸 수 있을 것으로 봅니다. 64비트로 돌면 더 빠를 것으로 기대하지만, 실기에서 확인하지 않았습니다. arm64 Linux에서 다음처럼 만듭니다.
+
+```sh
+docker build -t atmos67-aarch64 -f packaging/Dockerfile.aarch64 packaging
+docker run --rm -v "$PWD":/work atmos67-aarch64 packaging/build-aarch64.sh
+```
+
+결과는 `target/packages-aarch64/atmos67-<버전>-aarch64`입니다. musl로 정적 링크하고, FFmpeg는 armhf 패키지와 같은 구성입니다.
+
+- **확인한 것** (M1 VM): 시험(단위, `tests/e2e.rs`, `tests/send.rs`, `tests/samples.rs`)이 통과합니다. armhf Debian bullseye 컨테이너(arm64 커널)에서도 돕니다. 출력은 같은 머신의 동적 빌드와 바이트 단위로 같고, 속도도 같습니다. 32비트 바이너리와는 출력이 조금 다릅니다. 부동소수점 계산 경로가 다르기 때문입니다.
+- **Vero V에서 비교하기**: `bench/`에 60초 입력 두 개를 함께 둡니다(`target/packages-aarch64/bench/`). 둘 다 Vero V로 옮긴 뒤 다음을 실행합니다.
+
+  ```sh
+  for b in /usr/bin/atmos67 ./atmos67-0.1.0-aarch64; do
+      time $b --layout 7.1.4 --input-channels 8 < truehd-atmos-60s.spdif > /dev/null
+      time $b --layout 7.1.4 < eac3-joc-60s.spdif > /dev/null
+  done
+  ```
+
+  `real`이 60초보다 충분히 작아야 실시간으로 돕니다.
+- **바꿔 쓰기**: `sudo install -m 755 atmos67-0.1.0-aarch64 /usr/bin/atmos67 && sudo systemctl restart atmos67`. 되돌리려면 `.deb`를 다시 설치합니다. 패키지를 업그레이드해도 32비트로 돌아갑니다.
+
 ### 보정, 베이스 매니지먼트, 볼륨
 
 송출기가 보내기 전에 스피커를 보정합니다. 애드온의 "베이스 매니지먼트·레벨" 범주에서 모드를 고릅니다.
