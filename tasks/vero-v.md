@@ -49,11 +49,11 @@ Kodi ─> hdmi_atmos67 (루프백 재생) ─> arecord (hw:Loopback,1,0) ─> at
 `target/` 아래의 래퍼는 git에 없다(`.gitignore`).
 
 ```sh
-# VM 재부팅 후 한 번: 32비트 ARM용 qemu 등록 (시험이 armhf 바이너리를 실행한다)
-container machine run --root -n linux-test -- sh /Users/saya6k/Projects/atmos67/target/binfmt.sh
 # 이미지 빌드, 시험, 패키지 조립, 설치 시험. 결과는 target/packages/
-container machine run --root -n linux-test -- sh /Users/saya6k/Projects/atmos67/target/pkg.sh
+sh target/pkg.sh
 ```
+
+- `docker`는 Mac의 socktainer로 간다. 컨테이너마다 커널이 따로라 qemu-arm binfmt 등록이 다음 컨테이너로 이어지지 않는다. armhf 바이너리를 직접 실행하는 컨테이너는 `--privileged`로 띄우고 같은 컨테이너 안에서 `target/binfmt-inner.sh`를 먼저 돌린다(`target/armhf.sh`가 그렇게 한다).
 
 - `target/armhf.sh [스크립트]`: 교차 빌드 컨테이너에서 스크립트를 돌린다. `target/clippy-inner.sh`가 clippy.
 - `target/pkgtest-inner.sh`: 컨테이너에 `.deb`를 설치하고 ALSA 설정, `ptp4l`, 서비스 스크립트의 송출 경로를 본다.

@@ -56,7 +56,7 @@ cargo test -- --ignored         # samples/ 의 실제 파일을 쓰는 시험 (s
 cargo clippy --all-targets -- -D warnings
 ```
 
-이 Mac에는 Rust가 없어 `linux-test` 컨테이너 머신의 `rust:alpine` 이미지에서 돌린다(`apk add ffmpeg-dev clang-dev pkgconf` 필요). 래퍼 스크립트는 `target/` 아래에 두고 커밋하지 않는다.
+이 Mac에는 Rust가 없어 `docker`(socktainer)로 `rust:alpine` 이미지에서 돌린다(`apk add ffmpeg-dev clang-dev pkgconf` 필요). 래퍼 스크립트는 `target/` 아래에 두고 커밋하지 않는다.
 
 ## Project Structure
 
@@ -115,7 +115,7 @@ pub fn next_burst(&mut self) -> Option<(u8, &[u8])> {
 4. **DTS:X와 MAT PCM.** DTS:X 샘플은 7.1 베드로 나오고, 객체를 렌더하지 않는다는 사실을 stderr에 한 번 알린다.
 5. **기존 동작 유지.** 현재 시험 10개가 계속 통과하고, 이미 디코딩되던 E-AC-3 JOC 샘플 6개의 출력이 바뀌지 않는다.
 6. **캡처 클록.** 모든 경로에서 출력 프레임 수가 입력 길이에 대응한다(현행 무음 채움 규칙 유지, 오차 2 액세스 유닛 이내).
-7. **성능.** 모든 경로가 `linux-test` ARM VM에서 스레드 하나로 실시간의 3배 이상.
+7. **성능.** 모든 경로가 이 Mac의 ARM 컨테이너 VM(Apple `container`)에서 스레드 하나로 실시간의 3배 이상.
 8. README의 지원 범위 표와 실제 샘플 시험 절이 결과와 일치한다.
 
 ## Open Questions
